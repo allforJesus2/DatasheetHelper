@@ -9,6 +9,8 @@ import re
 from datetime import datetime
 import math
 import json
+import tkinter as tk
+from tkinter import messagebox
 
 def find_cells(sheet, search_terms):
     cells = []
@@ -40,134 +42,83 @@ def combine_tables(tables):
     print(tag_dict_combined)
     return tag_dict_combined
 
-def get_table_length(sheet, header_cell):
-    start_row = header_cell.row + 1
-    end_value = header_cell.value
 
-    # Initialize table_length to 0
-    table_length = 0
+def get_unique_sheet_name(datasheet, ds_prefix, sheet_number):
+    """Generate unique sheet name, incrementing suffix if needed"""
+    base_name = f"{ds_prefix}{str(sheet_number).zfill(2)}"
+    name = base_name
+    suffix = 1
 
-    # Iterate down the column starting from the row of the given cell
-    current_row = start_row
-    current_value = sheet.cell(row=current_row, column=header_cell.column).value
+    while name in datasheet.sheets:
+        name = f"{base_name}_{suffix}"
+        suffix += 1
 
+    return name
 
-    # Continue iterating until an empty cell is encountered
-    max_row = sheet.max_row
-    while current_value and current_row <= max_row:
-        if current_value == end_value:
-            break
-        table_length += 1
-        current_row += 1
-        current_value = sheet.cell(row=current_row, column=header_cell.column).value
-        print(current_value)
+def add_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
+                   rows_per_sheet=1, custom_sort=None, key_coordinate='I12'):
+    """
+    Manages Excel sheets by adding or updating data based on tags.
 
-    return table_length
-
-def add_datasheets(datasheet_path, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
-                   tag_pattern=r'^[0-9]{3}-[A-Z]{2,3}-[0-9]{4}[A-Z]?$', rows_per_sheet=1, custom_sort=None):
-    if rows_per_sheet > 1:
-        count, tag_set = get_count(datasheet_path, tag_pattern, ds_prefix)  # count = 0
-    else:
-        count, tag_set = get_count(datasheet_path, tag_pattern, '')
-    print(f'existing tag set:\n{tag_set}')
-    datasheet = xw.Book(datasheet_path)
+    Args:
+        datasheet: Excel workbook object
+        source_sheet_name: Name of template sheet to copy from
+        tag_cell_values: Dict of tags mapping to cell value updates {tag: {cell_ref: value}}
+        datasheet_coord: Cell reference where sheet name should be written
+        ds_prefix: Prefix for new sheet names
+        rows_per_sheet: Number of data rows per sheet (default=1)
+        custom_sort: Optional function for custom tag sorting
+        key_coordinate: Starting cell reference for tag placement (default='I12')
+    """
     source_sheet = datasheet.sheets[source_sheet_name]
+    added_sheets = set()  # Track sheets we modify
 
-    # Get the sorted list of keys from the filtered dictionary
-    if custom_sort:
-        sorted_keys = sorted(tag_cell_values, key=custom_sort)
-    else:
-        sorted_keys = sorted(tag_cell_values)
-
-    print(sorted_keys)
-    # tag_filters = [{'header':'TAG PFX','filter':'CV'}, {'header':'ACT TYPE', 'filter':'PNEUMATIC'}]
-    # tag_filters = [['TAG PFX','CV'], [ACT TYPE', 'PNEUMATIC']]
-    for tag in sorted_keys:
-        if tag in tag_set:
-            print(f'tag {tag} already in datasheet. Continuing...')
-            continue
-
-        if rows_per_sheet > 1:
-            ds_name = ds_prefix + str((count // rows_per_sheet) + 1).zfill(2)
-        else:  # its a one tag sheet
-            ds_name = tag
-
-        # need to make a new sheet?
-        if count % rows_per_sheet == 0:
-
-            try:
-                datasheet.sheets[ds_name].delete()
-            except:
-                pass
-            new_sheet = source_sheet.copy(name=ds_name)
-            new_sheet.range(datasheet_coord).value = ds_prefix + str((count // rows_per_sheet) + 1).zfill(2)
-        else:
-            print(ds_name)
-            new_sheet = datasheet.sheets[ds_name]
-        # grab the cell values from the dictionary
-        cell_values = tag_cell_values[tag]
-
-        # its not going to change anything if rows per sheet is 1 cause that always has a remainder of 0
-        incremented_cell_values = increment_cell_values_row(cell_values, count % rows_per_sheet)
-        count += 1
-
-        for cell, value in incremented_cell_values.items():
-            try:
-                new_sheet.range(cell).value = value
-                # new_sheet.range(cell).api.Font.Color = 255  # 255 represents red color in Excel
-            except Exception as e:
-                print(e)
-
-def add_datasheets2(datasheet_path, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
-                    rows_per_sheet=1, custom_sort=None, key_coordinate='I12'):
-
-    datasheet = xw.Book(datasheet_path)
-    source_sheet = datasheet.sheets[source_sheet_name]
-
-    # Get existing tags and their locations
+    # Build dictionary of existing tags and their locations in workbook
     existing_tags = {}
     for sheet in datasheet.sheets:
         if sheet.name.startswith(ds_prefix) or ds_prefix == '':
             for i in range(rows_per_sheet):
                 offset_coord = increment_cell_reference(key_coordinate, i)
                 tag_value = sheet.range(offset_coord).value
-                if tag_value:# and re.search(tag_pattern, str(tag_value)):
+                if tag_value:
                     existing_tags[tag_value] = (sheet.name, offset_coord)
-                    #we need to update the values here and not later
+
 
     print(f'Existing tags: {existing_tags}')
 
-    if custom_sort:
-        sorted_keys = sorted(tag_cell_values, key=custom_sort)
-    else:
-        sorted_keys = sorted(tag_cell_values)
-
+    # Sort tags according to custom function or default alphabetical
+    sorted_keys = sorted(tag_cell_values, key=custom_sort) if custom_sort else sorted(tag_cell_values)
     print(f'Tags to process: {sorted_keys}')
 
+    # Process each tag - either update existing or create new entry
     count = len(existing_tags)
     for tag in sorted_keys:
         if tag in existing_tags:
+            # Update values for existing tag
             print(f'Updating existing tag {tag}')
             sheet_name, tag_coord = existing_tags[tag]
             target_sheet = datasheet.sheets[sheet_name]
         else:
+            # Create new sheet if needed based on rows_per_sheet
             print(f'Adding new tag {tag}')
             if count % rows_per_sheet == 0:
-                sheet_name = f"{ds_prefix}{str((count // rows_per_sheet) + 1).zfill(2)}"
+                sheet_name = get_unique_sheet_name(datasheet, ds_prefix, (count // rows_per_sheet) + 1)
                 try:
-                    datasheet.sheets[sheet_name].delete()
+                    datasheet.sheets[sheet_name].delete()  # Remove if exists
                 except:
                     pass
                 target_sheet = source_sheet.copy(name=sheet_name)
+                added_sheets.add(sheet_name)  # Track new sheets
                 target_sheet.range(datasheet_coord).value = sheet_name
             else:
-                sheet_name = f"{ds_prefix}{str((count // rows_per_sheet) + 1).zfill(2)}"
+                sheet_name = get_unique_sheet_name(datasheet, ds_prefix, (count // rows_per_sheet) + 1)
+                print('Might need to make sure existing sheet names dont cause issues')
                 target_sheet = datasheet.sheets[sheet_name]
 
             tag_coord = increment_cell_reference(key_coordinate, count % rows_per_sheet)
             count += 1
 
+        # Update all specified cells for this tag
         cell_values = tag_cell_values[tag]
         row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
 
@@ -178,9 +129,16 @@ def add_datasheets2(datasheet_path, source_sheet_name, tag_cell_values, datashee
             except Exception as e:
                 print(f"Error updating cell {cell} for tag {tag}: {e}")
 
-    # Remove the workbook from xlwings' internal collection
-    #datasheet.app.cleanup()
-    return datasheet
+    return list(added_sheets)  # Return list of all sheets we Added
+
+def translate(input_string, transformation_code):
+    try:
+        x_fn = eval(f'lambda x: {transformation_code}')
+        transformed_string = x_fn(input_string)
+        return transformed_string
+    except Exception as e:
+        return f'error applying transformation: {e}'
+
 
 def update_datasheets(datasheet_path, tag_cell_values, ds_prefix, rows_per_sheet=1, key_coordinate='I12'):
 
@@ -208,66 +166,6 @@ def increment_cell_reference(cell_ref, increment):
     row = int(''.join(filter(str.isdigit, cell_ref)))
     return f"{col}{row + increment}"
 
-def get_count(workbook_path, tag_pattern, ds_prefix):
-    # Open the Excel workbook in read-only mode
-    workbook = openpyxl.load_workbook(workbook_path, read_only=True)
-    sheet_tag_set = set()
-    # Iterate through each sheet in the Excel workbook
-    for sheet in workbook.sheetnames:
-        # Check if the sheet name starts with the specified string
-        if sheet.startswith(ds_prefix) or ds_prefix == '':
-            # print(sheet)
-
-            # Access the active sheet
-            active_sheet = workbook[sheet]
-
-            # Iterate through all cells in the active sheet
-            for row in active_sheet.iter_rows(values_only=True):
-                for cell_value in row:
-                    cell_value = str(cell_value)
-
-                    # Use the re.search() function to find matches with the tag_pattern
-                    if re.search(tag_pattern, cell_value):
-                        sheet_tag_set.add(cell_value)
-                        # print(cell_value)
-            # print(len(sheet_tag_set))
-
-    return len(sheet_tag_set), sheet_tag_set
-
-def increment_cell_values_row(cell_values, amount):
-    new_cell_values = {}
-    for key, value in cell_values.items():
-
-        new_key = increment_coord(key)
-        new_cell_values[new_key] = value
-
-    return new_cell_values
-
-def increment_coords_to_fields(coords_to_fields):
-    new_coords_to_fields = {}
-    for coord, field_name in coords_to_fields.items():
-
-        new_coord = increment_coord(coord)
-        new_coords_to_fields[new_coord] = field_name
-
-    return new_coords_to_fields
-
-def increment_coord(coord):
-    letter_part, numeric_part = split_text_on_first_number(coord)
-    new_coord = letter_part + str(int(numeric_part) + 1)
-    return new_coord
-
-def split_text_on_first_number(text):
-    match = re.search(r'\d', text)  # Search for the first digit in the text
-    if match:
-        first_number_index = match.start()  # Get the index of the first digit
-        text_before_number = text[:first_number_index]  # Text before the first number
-        text_after_number = text[first_number_index:]  # Text from the first number onward
-        return text_before_number, text_after_number
-    else:
-        # If there is no digit in the text, return the entire text
-        return text, ''
-
 def list_to_tag_dict(table_list, tag):
     # tag is a string
     tag_dict = {}
@@ -285,7 +183,7 @@ def list_to_tag_dict(table_list, tag):
     return tag_dict
 
 def generate_dictionary_from_xlsx(wb_path, headers):
-    wb = openpyxl.load_workbook(wb_path, read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(wb_path, read_only=False, data_only=True)
     # process_conditions['09-PM-006-2'] = ...
     wb_tag_data = {}
     sheet_names = wb.sheetnames
@@ -326,40 +224,51 @@ def process_sheet(sheet, headers):
 
     return tables
 
-def transpose_matrix(matrix):
-    # Check if the input is a valid 2D matrix
-    if not all(isinstance(row, list) for row in matrix):
-        raise ValueError("Input must be a 2D matrix.")
-
-    # Calculate the dimensions of the matrix
-    num_rows = len(matrix)
-    num_cols = len(matrix[0]) if num_rows else 0
-
-    # Transpose the matrix
-    transposed_matrix = [[matrix[j][i] for j in range(num_rows)] for i in range(num_cols)]
-
-    return transposed_matrix
+def get_value_above(sheet, row, col):
+    """Get value from merged cell above or regular cell."""
+    current_row = row
+    while current_row > 1:
+        current_row -= 1
+        for range_string in sheet.merged_cells.ranges:
+            min_col, min_row, max_col, max_row = range_string.bounds
+            if (min_row <= current_row <= max_row and
+                min_col <= col <= max_col):
+                print('mereged cell ', sheet.cell(min_row, min_col).value)
+                return sheet.cell(min_row, min_col).value
+        cell_value = sheet.cell(row=current_row, column=col).value
+        if cell_value is not None:
+            return cell_value
+    return None
 
 def table_to_list(sheet, start_row, start_col, end_row, end_col, column_headers=False):
-    # This function converts a specified range of a spreadsheet sheet into a list of dictionaries,
-    # where each dictionary represents a row in the sheet and its keys are the column headers.
     matrix = []
-    for row in sheet.iter_rows(min_row=start_row, max_row=end_row, min_col=start_col, max_col=end_col, values_only=True):
-        print('checking row ', row)
-        matrix.append(list(row))
+    for row in sheet.iter_rows(min_row=start_row, max_row=end_row,
+                             min_col=start_col, max_col=end_col,
+                             values_only=False):
+        row_values = [cell.value for cell in row]
+        matrix.append(row_values)
 
-    if column_headers:
-        matrix = transpose_matrix(matrix)
-
-    # Extract headers based on the start column
     headers = matrix.pop(0)
+    modified_headers = headers.copy()
+
+    # Handle duplicates considering merged cells
+    header_counts = {}
+    for i, header in enumerate(headers):
+        if header is None:
+            continue
+        header_counts[header] = header_counts.get(header, 0) + 1
+
+    for i, header in enumerate(headers):
+        if header_counts[header] > 1:
+            col_index = start_col + i
+            print(sheet.cell(start_row-1, col_index).value)
+            above_value = get_value_above(sheet, start_row, col_index)
+            if above_value:
+                modified_headers[i] = f"{above_value}_{header}"
 
     table_list = []
-
-    # Iterate over rows from start_row to end_row
     for row in matrix:
-        # Convert each row to a dictionary using the extracted headers
-        row_dict = dict(zip(headers, row))
+        row_dict = dict(zip(modified_headers, row))
         table_list.append(row_dict)
 
     return table_list
@@ -382,30 +291,6 @@ def get_table_length_rows(sheet, header_cell):
 
         current_row += 1
         table_length += 1
-
-    return table_length
-
-def get_table_length_cols(sheet, header_cell):
-    start_col = header_cell.column
-    end_value = header_cell.value
-    max_col = sheet.max_column
-    current_col = start_col
-    # Initialize table_length to 0
-    table_length = 0
-
-    # Iterate over each row in the sheet
-    for row in sheet.iter_rows(values_only=True):
-
-
-        current_col += 1
-        table_length += 1
-
-        # Access the cell in the column corresponding to the header_cell
-        current_value = row[current_col - 1]  # Adjusting for zero-based indexing
-
-        # Break the loop if an empty cell is encountered or if the current value matches the end value
-        if current_col >= max_col or current_value == end_value:
-            break
 
     return table_length
 
@@ -453,3 +338,59 @@ def load_dict_from_json(file_path):
         raise FileNotFoundError(f"The file {file_path} was not found.")
     except json.JSONDecodeError:
         raise json.JSONDecodeError(f"The file {file_path} is not valid JSON.")
+
+
+def analyze_nested_dict_keys(dict_of_dicts):
+    if not dict_of_dicts:
+        return {
+            'consistent': True,
+            'inconsistencies': []
+        }
+
+    # Get first dictionary's keys as reference
+    reference_keys = set(next(iter(dict_of_dicts.values())).keys())
+
+    inconsistencies = []
+
+    # Check each dictionary against the reference
+    for key, d in dict_of_dicts.items():
+        current_keys = set(d.keys())
+        if current_keys != reference_keys:
+            missing_keys = reference_keys - current_keys
+            extra_keys = current_keys - reference_keys
+
+            inconsistency = {
+                'key': key,  # Using the dictionary key instead of index
+                'missing_keys': list(missing_keys) if missing_keys else None,
+                'extra_keys': list(extra_keys) if extra_keys else None
+            }
+            inconsistencies.append(inconsistency)
+
+    return {
+        'consistent': len(inconsistencies) == 0,
+        'reference_keys': list(reference_keys),
+        'total_dictionaries': len(dict_of_dicts),
+        'inconsistent_count': len(inconsistencies),
+        'inconsistencies': inconsistencies
+    }
+
+
+def show_nested_dict_analysis(dict_of_dicts):
+    result = analyze_nested_dict_keys(dict_of_dicts)
+
+    # Build the message string
+    if result['consistent']:
+        message = "All nested dictionaries have the same keys!"
+    else:
+        message = f"Found {result['inconsistent_count']} inconsistent dictionaries out of {result['total_dictionaries']}\n\n"
+        message += f"Reference keys: {', '.join(result['reference_keys'])}\n\n"
+        message += "Inconsistencies:\n"
+
+        for item in result['inconsistencies']:
+            message += f"\nDictionary with key '{item['key']}':\n"
+            if item['missing_keys']:
+                message += f"  Missing keys: {', '.join(item['missing_keys'])}\n"
+            if item['extra_keys']:
+                message += f"  Extra keys: {', '.join(item['extra_keys'])}\n"
+
+    messagebox.showinfo("Nested Dictionary Key Analysis Results", message)
