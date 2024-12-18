@@ -11,13 +11,13 @@ from Data_Extraction import DatasheetExtractor
 from xlsx_search import ExcelSearchApp
 from edit_xlsx import ExcelEditorApp
 import pickle
+from tkinter.simpledialog import askstring
 
 
 class DatasheetGeneratorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Data Generator App")
-        self.create_widgets()
         self.wb = None
         self.app = None
         self.new_sheets = []
@@ -47,6 +47,8 @@ class DatasheetGeneratorApp:
         for param, value in self.parameters.items():
             setattr(self, param, value)
 
+        self.create_widgets()
+
     def create_widgets(self):
         # Create menu bar
         self.menu_bar = tk.Menu(self.root)
@@ -59,6 +61,7 @@ class DatasheetGeneratorApp:
         # Add menu items
         menu_commands = [
             ("Load Settings", self.load_settings),
+            ("Load Settings except td and pc", self.load_settings_except_td_pc),
             ("Save Settings", self.save_settings),
             ("Transformation Code and Key", self.get_xkey),
             ("Index Filters", self.set_tag_filters),
@@ -72,7 +75,8 @@ class DatasheetGeneratorApp:
             ("Assign Coordinate Values", self.assign_value_coordinate_to_tag),
             ("View Coordinate Value Data", self.display_coordinate_values),
             ("Configure Datasheet", self.configure_add_datasheet),
-            ("Delete newly added datasheets", self.delete_added_sheets)
+            ("Delete newly added datasheets", self.delete_added_sheets),
+            ("Modify Keys in PC", self.update_pc_keys)
         ]
 
         for label, command in menu_commands:
@@ -153,9 +157,28 @@ class DatasheetGeneratorApp:
         tk.Button(ds_buttons, text="View",
                   command=lambda: self.view_data("Datasheets")).pack(side=tk.LEFT, padx=2)
 
-    def delete_added_sheets(self):
-        for sheet in self.new_sheets:
-            self.wb.sheets[sheet].delete()
+        # Create notebook after entries
+        self.config_frame = tk.Frame(main_frame)
+        self.config_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        self.notebook = ttk.Notebook(self.config_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        # Create tab pages
+        coordinates_tab = ttk.Frame(self.notebook)
+        datasheet_tab = ttk.Frame(self.notebook)
+        filters_tab = ttk.Frame(self.notebook)
+        transform_tab = ttk.Frame(self.notebook)
+
+        self.notebook.add(coordinates_tab, text='Coordinates')
+        self.notebook.add(datasheet_tab, text='Datasheet')
+        self.notebook.add(filters_tab, text='Filters')
+        self.notebook.add(transform_tab, text='Transform')
+
+        self.create_coordinates_tab(coordinates_tab)
+        self.create_datasheet_tab(datasheet_tab)
+        self.create_filters_tab(filters_tab)
+        self.create_transform_tab(transform_tab)
 
     def configure_coordinate_value_data(self):
         if not self.app:
@@ -349,6 +372,329 @@ class DatasheetGeneratorApp:
 
         # Add this to your configure_window setup
         # configure_window.protocol("WM_DELETE_WINDOW", on_configure_window_close)
+
+    def create_coordinates_tab(self, tab):
+        def init_excel():
+            if not self.app:
+                self.app = xw.App(visible=True)
+            if self.datasheet_path:
+                self.wb = self.app.books.open(self.datasheet_path)
+
+        def get_combo_values():
+            td_values = []
+            pc_values = []
+            for key, value in self.td.items():
+                td_values = list(value.keys())
+                break
+            for key, value in self.pc.items():
+                pc_values = list(value.keys())
+                break
+            return td_values, pc_values
+
+        def add_coordinate(coord_type, entry, combo, listbox):
+            coord = entry.get()
+            value = combo.get()
+            if coord and value:
+                if coord_type == "td":
+                    self.td_coordinate_values[coord] = value
+                    if not self.td_coordinate_values:
+                        self.top_tag = coord
+                else:
+                    self.pc_coordinate_values[coord] = value
+                update_listboxes()
+
+        def remove_coordinate(coord_type, listbox):
+            selected = listbox.curselection()
+            if selected:
+                idx = selected[0]
+                coord = listbox.get(idx).split(':')[0]
+                if coord_type == "td":
+                    del self.td_coordinate_values[coord]
+                else:
+                    del self.pc_coordinate_values[coord]
+                update_listboxes()
+
+        def clear_coordinates(coord_type, listbox):
+            if coord_type == "td":
+                self.td_coordinate_values.clear()
+            else:
+                self.pc_coordinate_values.clear()
+            update_listboxes()
+
+        def update_entry():
+            if self.datasheet_path:
+                try:
+                    current_selection = xw.apps.active.selection.address
+                    current_selection = current_selection.split(':')[0].replace('$', '')
+                    entry_var.set(current_selection)
+                except:
+                    pass
+            tab.after(200, update_entry)
+
+        def update_td_listbox():
+            td_listbox.delete(0, tk.END)
+            for key, value in self.td_coordinate_values.items():
+                td_listbox.insert(tk.END, f"{key}: {value}")
+            try:
+                first_entry = td_listbox.get(0)
+                self.top_tag = first_entry.split(':')[0]
+            except:
+                print('failed to set top_tag')
+
+        def update_pc_listbox():
+            pc_listbox.delete(0, tk.END)
+            for key, value in self.pc_coordinate_values.items():
+                pc_listbox.insert(tk.END, f"{key}: {value}")
+
+        def update_listboxes():
+            update_td_listbox()
+            update_pc_listbox()
+
+        def reinitialize():
+            init_excel()
+            td_values, pc_values = get_combo_values()
+            td_combo['values'] = td_values
+            pc_combo['values'] = pc_values
+            update_listboxes()
+
+        # Initial Excel setup if path exists
+        init_excel()
+        td_combo_values, pc_combo_values = get_combo_values()
+
+        # UI Setup (same as before)
+        top_frame = ttk.Frame(tab)
+        top_frame.pack(fill="x", padx=10, pady=5)
+
+        coord_label = ttk.Label(top_frame, text="Enter Key Coordinate:\n(First entry is top tag default)")
+        coord_label.pack(side="left")
+
+        entry_var = tk.StringVar()
+        coord_entry = ttk.Entry(top_frame, textvariable=entry_var)
+        coord_entry.pack(side="left", fill="x", expand=True)
+
+        content_frame = ttk.Frame(tab)
+        content_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        td_frame = ttk.LabelFrame(content_frame, text="TD Coordinates")
+        td_frame.pack(side="left", fill="both", expand=True, padx=5)
+
+        td_controls = ttk.Frame(td_frame)
+        td_controls.pack(fill="x", padx=5, pady=5)
+
+        td_label = ttk.Label(td_controls, text="Select TD Value:")
+        td_label.pack(side="left")
+
+        td_combo = ttk.Combobox(td_controls, values=td_combo_values, state="readonly")
+        td_combo.pack(side="left", fill="x", expand=True, padx=5)
+
+        td_btn_frame = ttk.Frame(td_frame)
+        td_btn_frame.pack(fill="x", padx=5)
+
+        td_listbox = tk.Listbox(td_frame, height=15)
+        td_listbox.pack(fill="both", expand=True, padx=5, pady=5)
+
+        ttk.Button(td_btn_frame, text="Add to TD",
+                   command=lambda: add_coordinate("td", coord_entry, td_combo, td_listbox)).pack(side="left", padx=2)
+        ttk.Button(td_btn_frame, text="Remove",
+                   command=lambda: remove_coordinate("td", td_listbox)).pack(side="left", padx=2)
+        ttk.Button(td_btn_frame, text="Clear All",
+                   command=lambda: clear_coordinates("td", td_listbox)).pack(side="left", padx=2)
+
+        xfn_button = ttk.Button(content_frame, text="Transformation\nCode and Key", command=self.get_xkey)
+        xfn_button.pack(side="left", padx=10)
+
+        pc_frame = ttk.LabelFrame(content_frame, text="PC Coordinates")
+        pc_frame.pack(side="left", fill="both", expand=True, padx=5)
+
+        pc_controls = ttk.Frame(pc_frame)
+        pc_controls.pack(fill="x", padx=5, pady=5)
+
+        pc_label = ttk.Label(pc_controls, text="Select PC Value:")
+        pc_label.pack(side="left")
+
+        pc_combo = ttk.Combobox(pc_controls, values=pc_combo_values, state="readonly")
+        pc_combo.pack(side="left", fill="x", expand=True, padx=5)
+
+        pc_btn_frame = ttk.Frame(pc_frame)
+        pc_btn_frame.pack(fill="x", padx=5)
+
+        pc_listbox = tk.Listbox(pc_frame, height=15)
+        pc_listbox.pack(fill="both", expand=True, padx=5, pady=5)
+
+        ttk.Button(pc_btn_frame, text="Add to PC",
+                   command=lambda: add_coordinate("pc", coord_entry, pc_combo, pc_listbox)).pack(side="left", padx=2)
+        ttk.Button(pc_btn_frame, text="Remove",
+                   command=lambda: remove_coordinate("pc", pc_listbox)).pack(side="left", padx=2)
+        ttk.Button(pc_btn_frame, text="Clear All",
+                   command=lambda: clear_coordinates("pc", pc_listbox)).pack(side="left", padx=2)
+
+        update_listboxes()
+        tab.after(200, update_entry)
+
+        # Expose reinitialize method for external calls
+        tab.reinitialize = reinitialize
+        return tab
+    def create_datasheet_tab(self, tab):
+        fields = [
+            ("Source Sheet Name", "source_sheet_name", ttk.Combobox),
+            ("Datasheet Coordinate", "datasheet_coord", ttk.Entry),
+            ("Datasheet String", "ds_str", ttk.Entry),
+            ("Tag Pattern", "tag_pattern", ttk.Entry),
+            ("Top Tag", "top_tag", ttk.Entry),
+            ("Rows per Sheet", "rows_per_sheet", ttk.Entry)
+        ]
+
+        entries = {}
+        for i, (label, attr, widget_type) in enumerate(fields):
+            ttk.Label(tab, text=label).grid(row=i, column=0, padx=5, pady=5, sticky="w")
+            w = widget_type(tab)
+            w.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
+            if hasattr(self, attr):
+                w.insert(0, getattr(self, attr))
+            if widget_type == ttk.Combobox:
+                w['values'] = self.get_sheet_names()
+            entries[attr] = w
+
+        def save_datasheet_settings():
+            for attr, entry in entries.items():
+                if attr == 'rows_per_sheet':
+                    try:
+                        setattr(self, attr, int(entry.get()))
+                    except ValueError:
+                        setattr(self, attr, 0)
+                else:
+                    setattr(self, attr, entry.get())
+
+        save_btn = ttk.Button(tab, text="Save", command=save_datasheet_settings)
+        save_btn.grid(row=len(fields), column=0, columnspan=2, pady=10)
+        tab.grid_columnconfigure(1, weight=1)
+
+    def create_filters_tab(self, tab):
+        # Add filter frame
+        add_frame = ttk.Frame(tab)
+        add_frame.pack(fill="x", padx=5, pady=5)
+
+        filters_entries = []
+        td_combo_values = []
+
+        for key, value in self.td.items():
+            td_combo_values = list(value.keys())
+            break
+
+
+        def add_filter_row(name='', filter_value=''):
+            new_row = len(filters_entries) + 1
+            name_label = tk.Label(content_frame, text=f"Index Key {new_row}:")
+            name_label.grid(row=new_row, column=0)
+            name_entry = ttk.Combobox(content_frame, values=td_combo_values)
+            name_entry.grid(row=new_row, column=1)
+            name_entry.set(name)
+
+            filter_label = tk.Label(content_frame, text=f"Filter {new_row}:")
+            filter_label.grid(row=new_row, column=2)
+            filter_entry = tk.Entry(content_frame)
+            filter_entry.grid(row=new_row, column=3)
+            filter_entry.insert(0, filter_value)
+
+            filters_entries.append((name_entry, filter_entry))
+
+        def save_filters():
+            self.tag_filters.clear()
+            for name_entry, filter_entry in filters_entries:
+                name = name_entry.get()
+                filter_value = filter_entry.get()
+                if name and filter_value:
+                    self.tag_filters.append([name, filter_value])
+
+        content_frame = ttk.Frame(tab)
+        content_frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+        button_frame = ttk.Frame(tab)
+        button_frame.pack(fill="x", padx=5, pady=5)
+
+        add_button = ttk.Button(button_frame, text="Add Filter", command=lambda: add_filter_row())
+        add_button.pack(side="left", padx=5)
+
+        save_button = ttk.Button(button_frame, text="Save", command=save_filters)
+        save_button.pack(side="right", padx=5)
+
+        for name, filter_value in self.tag_filters:
+            add_filter_row(name, filter_value)
+
+        add_filter_row()  # Add empty row
+
+    def create_transform_tab(self, tab):
+        # Source key selector
+        key_frame = ttk.Frame(tab)
+        key_frame.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(key_frame, text="Index Source Key:").pack(side="left")
+
+        td_combo_values = []
+        for key, value in self.td.items():
+            td_combo_values = list(value.keys())
+            break
+
+        key_combo = ttk.Combobox(key_frame, values=td_combo_values)
+        key_combo.pack(side="left", fill="x", expand=True, padx=5)
+        if self.td_xkey:
+            key_combo.set(self.td_xkey)
+
+        # Transformation code entry
+        code_frame = ttk.Frame(tab)
+        code_frame.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(code_frame, text="PC key, x = Index Value:").pack(side="left")
+        code_entry = ttk.Entry(code_frame)
+        code_entry.pack(side="left", fill="x", expand=True, padx=5)
+        code_entry.insert(0, self.transformation_code)
+
+        def save_transform():
+            self.td_xkey = key_combo.get()
+            self.transformation_code = code_entry.get()
+
+        ttk.Button(tab, text="Save", command=save_transform).pack(pady=5)
+
+
+    def refresh_tab_content(self):
+        # Recreate all tabs with updated data
+        for tab in self.notebook.winfo_children():
+            tab.destroy()
+
+        coordinates_tab = ttk.Frame(self.notebook)
+        datasheet_tab = ttk.Frame(self.notebook)
+        filters_tab = ttk.Frame(self.notebook)
+        transform_tab = ttk.Frame(self.notebook)
+
+        self.notebook.add(coordinates_tab, text='Coordinates')
+        self.notebook.add(datasheet_tab, text='Datasheet')
+        self.notebook.add(filters_tab, text='Filters')
+        self.notebook.add(transform_tab, text='Transform')
+
+        self.create_coordinates_tab(coordinates_tab)
+        self.create_datasheet_tab(datasheet_tab)
+        self.create_filters_tab(filters_tab)
+        self.create_transform_tab(transform_tab)
+
+
+    def get_sheet_names(self):
+        if not self.datasheet_path:
+            return []
+        try:
+            wb = openpyxl.load_workbook(self.datasheet_path, read_only=True)
+            return wb.sheetnames
+        except Exception as e:
+            print(f"Error getting sheet names: {e}")
+            return []
+
+    def update_pc_keys(self):
+        code = askstring("Enter transformation code", "Enter transformation code", initialvalue='"-".join(x.split("-")[-2:])')
+        self.pc = transform_dictionary(self.pc, code)
+
+    def delete_added_sheets(self):
+        for sheet in self.new_sheets:
+            self.wb.sheets[sheet].delete()
+
 
     def get_xkey(self):
         xkey_window = tk.Toplevel(self.root)
@@ -569,7 +915,7 @@ class DatasheetGeneratorApp:
                     # If the tag's value for this header isn't in our acceptable values, filter it out
                     if self.td[tag][header] not in acceptable_values:
                         continue_flag = True
-                        #break
+                        break
 
                 if continue_flag:
                     continue
@@ -829,16 +1175,8 @@ class DatasheetGeneratorApp:
         scrolled_text1.configure(state='disabled')  # Make
 
     def load_settings(self):
-        """
-        Loads settings from either JSON or pickle file based on file extension.
-        WARNING: Only load pickle files from trusted sources as they can execute arbitrary code.
-        """
         file_path = filedialog.askopenfilename(
-            filetypes=[
-                ("Settings files", "*.json *.pkl"),
-                ("JSON files", "*.json"),
-                ("Pickle files", "*.pkl")
-            ]
+            filetypes=[("Settings files", "*.json *.pkl"), ("JSON files", "*.json"), ("Pickle files", "*.pkl")]
         )
 
         if not file_path:
@@ -846,28 +1184,49 @@ class DatasheetGeneratorApp:
 
         try:
             file_ext = os.path.splitext(file_path)[1].lower()
-
             with open(file_path, 'rb' if file_ext == '.pkl' else 'r') as file:
-                if file_ext == '.pkl':
-                    # WARNING: Only use pickle with trusted data sources
-                    settings_data = pickle.load(file)
-                else:
-                    settings_data = json.load(file)
+                settings_data = pickle.load(file) if file_ext == '.pkl' else json.load(file)
 
-                # Update the parameters with loaded settings data
                 for key, value in settings_data.items():
                     if key in self.parameters:
                         setattr(self, key, value)
 
+                # Force tab content refresh
+                self.refresh_tab_content()
                 self.update_entries()
                 print(f"Settings loaded successfully from {file_ext} file!")
 
-        except FileNotFoundError:
-            print("File not found. Unable to load settings.")
-        except (json.JSONDecodeError, pickle.UnpicklingError) as e:
-            print(f"Error decoding file. Unable to load settings: {e}")
         except Exception as e:
-            print(f"Unexpected error loading settings: {e}")
+            print(f"Error loading settings: {e}")
+
+    def load_settings_except_td_pc(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Settings files", "*.json *.pkl"), ("JSON files", "*.json"), ("Pickle files", "*.pkl")]
+        )
+
+        if not file_path:
+            return
+
+        # Define excluded parameters
+        excluded_params = {'td', 'pc'}
+
+        try:
+            file_ext = os.path.splitext(file_path)[1].lower()
+            with open(file_path, 'rb' if file_ext == '.pkl' else 'r') as file:
+                settings_data = pickle.load(file) if file_ext == '.pkl' else json.load(file)
+
+                for key, value in settings_data.items():
+                    if key in self.parameters and key not in excluded_params:
+                        setattr(self, key, value)
+
+                # Force tab content refresh
+                self.refresh_tab_content()
+                self.update_entries()
+                print(f"Settings loaded successfully from {file_ext} file!")
+
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+
 
     def save_settings(self, use_pickle=True):
         """
@@ -938,10 +1297,8 @@ class DatasheetGeneratorApp:
                           key_coordinate=self.top_tag)
 
     def configure_ds(self):
-        self.configure_coordinate_value_data()
-        self.configure_add_datasheet()
-        self.set_tag_filters()
-        self.get_xkey()
+        self.refresh_tab_content()
+        self.update_entries()
 
 
 if __name__ == "__main__":

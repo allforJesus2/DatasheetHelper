@@ -103,7 +103,7 @@ class JsonResultsViewer:
                     tk.messagebox.showerror("Error", "Could not open file")
 
 class DocumentChunker:
-    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 100):
+    def __init__(self, chunk_size: int = 100, chunk_overlap: int = 10):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
@@ -241,6 +241,23 @@ class DocumentVectorizerGUI:
 
         # Store the last search results
         self.last_results = None
+
+    def should_process_file(self, file_path: Path) -> bool:
+        # Skip common irrelevant files
+        if file_path.name.startswith('~$') or file_path.name.startswith('.'):
+            return False
+
+        # Skip files over size limit (e.g. 10MB)
+        if file_path.stat().st_size > 10_000_000:
+            return False
+
+        # Skip backup/temp files
+        skip_patterns = ['backup', 'old', 'archive', 'temp']
+        if any(pattern in file_path.name.lower() for pattern in skip_patterns):
+            return False
+
+        return True
+
 
     def view_results(self):
         if not self.last_results:

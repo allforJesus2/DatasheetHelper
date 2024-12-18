@@ -1,18 +1,127 @@
 import openpyxl
-from openpyxl.cell.text import InlineFont
-#from openpyxl.cell.rich_text import TextBlock, CellRichText
-import openpyxl.styles as styles
-from openpyxl.styles import Font, Alignment
-import os
 import xlwings as xw
-import re
-from datetime import datetime
-import math
 import json
-import tkinter as tk
 from tkinter import messagebox
+from math import log10, floor
+
+def transform_dictionary(input_dict, transformation_code):
+    """
+    Transform all keys in a dictionary using the provided transformation code.
+    Returns a new dictionary with transformed keys and original values.
+    """
+    return {
+        translate(key, transformation_code): value
+        for key, value in input_dict.items()
+    }
+
+def try_round_to_sigfigs(num, sig_figs=4, tolerance=1e-2):
+    # Rounds a number to specified significant figures, with additional rounding for very close values.
+    org_num = num
+    try:
+        num = float(str(num).strip().replace(',', ''))
+    except:
+        return org_num
+
+    if num == 0:
+        return 0
+
+
+
+    # Get the order of magnitude
+    magnitude = floor(log10(abs(num)))
+
+    # Calculate the scaling factor
+    scale = 10 ** (sig_figs - 1 - magnitude)
+
+    # Round the scaled number
+    rounded = round(num * scale) / scale
+
+    # Additional rounding for very close values
+    if abs(rounded - round(rounded)) < tolerance:
+        rounded = round(rounded)
+
+    return rounded
 
 def find_cells(sheet, search_terms):
+    cells = []
+    concat_pairs = {}
+    concat_cells = {}
+
+    # Parse concat pairs from search terms
+    for term in search_terms:
+        if '+' in term:
+            first, second = term.split('+')
+            concat_pairs[first.lower()] = second.lower()
+
+    # Find cells and track concat pairs separately
+    for row in sheet.iter_rows():
+        for cell in row:
+            if not cell.value:
+                continue
+            cell_value = str(cell.value).lower()
+
+            if cell_value in [term.lower() for term in search_terms if '+' not in term]:
+                cells.append(cell)
+
+            if cell_value in concat_pairs:
+                second_value = concat_pairs[cell_value]
+                for second_cell in row:
+                    if second_cell.value and str(second_cell.value).lower() == second_value:
+                        concat_cells[cell] = second_cell
+                        cells.append(cell)
+                        break
+
+    return cells, concat_cells
+
+
+def process_sheet(sheet, headers):
+    header_cells, concat_pairs = find_cells(sheet, headers)
+    tables = []
+
+    for cell in header_cells:
+        table_length = get_table_length_rows(sheet, cell)
+        left_col, right_col = get_table_cols(sheet, cell)
+
+        table_dict_list = table_to_list(sheet, cell.row, left_col, cell.row + table_length, right_col)
+
+        original_header = next(h for h in headers if h.lower() == cell.value.lower() or
+                               ('+' in h and h.split('+')[0].lower() == cell.value.lower()))
+
+        tag_dict = list_to_tag_dict(table_dict_list, original_header)
+        tables.append(tag_dict)
+
+    return tables
+
+
+def list_to_tag_dict(table_list, tag):
+    tag_dict = {}
+    duplicate_counts = {}  # Track how many times we've seen each tag key
+
+    for row in table_list:
+        if '+' in tag:
+            first_tag, second_tag = tag.split('+')
+            if first_tag in row and second_tag in row:
+                base_tag_key = str(row[first_tag]) + str(row[second_tag])
+        else:
+            if tag in row:
+                base_tag_key = row[tag]
+
+        if base_tag_key in tag_dict:
+            # If we've seen this tag before, get the next available number
+            if base_tag_key not in duplicate_counts:
+                duplicate_counts[base_tag_key] = 1
+
+            duplicate_counts[base_tag_key] += 1
+            tag_key = f"{base_tag_key}_{duplicate_counts[base_tag_key]}"
+        else:
+            tag_key = base_tag_key
+
+        tag_dict[tag_key] = row
+
+    return tag_dict
+
+
+def find_cells_old(sheet, search_terms):
     cells = []
     # Find the row in the sheet that contains any of the specified search terms
     for term in search_terms:
@@ -125,6 +234,7 @@ def add_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coor
         for cell, value in cell_values.items():
             try:
                 target_cell = increment_cell_reference(cell, row_offset)
+                value = try_round_to_sigfigs(value)
                 target_sheet.range(target_cell).value = value
             except Exception as e:
                 print(f"Error updating cell {cell} for tag {tag}: {e}")
@@ -137,7 +247,8 @@ def translate(input_string, transformation_code):
         transformed_string = x_fn(input_string)
         return transformed_string
     except Exception as e:
-        return f'error applying transformation: {e}'
+        print(f'error applying transformation: {e}')
+        return input_string
 
 
 def update_datasheets(datasheet_path, tag_cell_values, ds_prefix, rows_per_sheet=1, key_coordinate='I12'):
@@ -166,22 +277,6 @@ def increment_cell_reference(cell_ref, increment):
     row = int(''.join(filter(str.isdigit, cell_ref)))
     return f"{col}{row + increment}"
 
-def list_to_tag_dict(table_list, tag):
-    # tag is a string
-    tag_dict = {}
-    # table_list is a list of dictionaries
-    for i, row in enumerate(table_list):
-        print(f'processing row {i}', end='\r')
-        # row is a dictionary
-        for key in row:
-            if key == tag:
-                tag_key = row[key]
-                # tag_key is the line number
-
-        tag_dict[tag_key] = row
-
-    return tag_dict
-
 def generate_dictionary_from_xlsx(wb_path, headers):
     wb = openpyxl.load_workbook(wb_path, read_only=False, data_only=True)
     # process_conditions['09-PM-006-2'] = ...
@@ -199,30 +294,6 @@ def generate_dictionary_from_xlsx(wb_path, headers):
             wb_tag_data.update(sheet_data)
 
     return wb_tag_data
-
-def process_sheet(sheet, headers):
-    header_cells = find_cells(sheet, headers)
-    tables = []
-    print(header_cells)
-    for cell in header_cells:
-        print('starting loop')
-        # Automatically determine table length based on the number of rows available in the sheet
-        print('getting table length')
-        table_length = get_table_length_rows(sheet, cell)
-        left_col, right_col = get_table_cols(sheet, cell)
-        # end = start + table_length
-        print('table rows ', table_length)
-        print('table cols ', right_col-left_col)
-        print('getting table list')
-        #we specify the start col and row as the header cell
-        table_dict_list = table_to_list(sheet, cell.row, left_col, cell.row + table_length, right_col)
-        # table_dict_list is a list of dictionaries (each item corresponding to a row) where the headers are the keys
-        print(table_dict_list)
-        print('getting tag dict')
-        tag_dict = list_to_tag_dict(table_dict_list, cell.value)
-        tables.append(tag_dict)
-
-    return tables
 
 def get_value_above(sheet, row, col):
     """Get value from merged cell above or regular cell."""
