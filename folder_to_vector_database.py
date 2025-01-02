@@ -425,7 +425,10 @@ class DocumentVectorizer:
         with open(file_path, 'rb') as file:
             pdf = pypdf.PdfReader(file)
             for page in pdf.pages:
-                text += page.extract_text() + "\n"
+                try:
+                    text += page.extract_text() + "\n"
+                except Exception as e:
+                    print('error ', e)
         return text
 
     def extract_text_from_docx(self, file_path: Path) -> str:

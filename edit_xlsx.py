@@ -182,7 +182,7 @@ class ExcelEditorApp:
             for i, row in enumerate(values):
                 for j, cell_value in enumerate(row):
                     if cell_value == keyword:
-                        target_cell = sheet.cells(i + 1 + row_offset, j + 1 + col_offset)
+                        target_cell = sheet.cells(i + 1 + row_offset, j + 2 + col_offset)
                         target_cell.value = new_value
                         print(f"Updated cell {target_cell.address} in sheet {sheet.name}")
 

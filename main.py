@@ -12,14 +12,16 @@ from xlsx_search import ExcelSearchApp
 from edit_xlsx import ExcelEditorApp
 import pickle
 from tkinter.simpledialog import askstring
-
+from excel_manager import *
 
 class DatasheetGeneratorApp:
+
+    # region Initialization
+
     def __init__(self, root):
         self.root = root
         self.root.title("Data Generator App")
-        self.wb = None
-        self.app = None
+        self.excel_mgr = ExcelManager()
         self.new_sheets = []
         self.parameters = {
             'process_conditions_path': '',
@@ -49,6 +51,9 @@ class DatasheetGeneratorApp:
 
         self.create_widgets()
 
+        #self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+
     def create_widgets(self):
         # Create menu bar
         self.menu_bar = tk.Menu(self.root)
@@ -74,9 +79,9 @@ class DatasheetGeneratorApp:
             ("Populate Headers on Datasheets", self.open_edit_xlsx),
             ("Assign Coordinate Values", self.assign_value_coordinate_to_tag),
             ("View Coordinate Value Data", self.display_coordinate_values),
-            ("Configure Datasheet", self.configure_add_datasheet),
             ("Delete newly added datasheets", self.delete_added_sheets),
-            ("Modify Keys in PC", self.update_pc_keys)
+            ("Modify Keys in PC", self.update_pc_keys),
+            ("Rebuild tabs", self.refresh_tab_content)
         ]
 
         for label, command in menu_commands:
@@ -180,205 +185,16 @@ class DatasheetGeneratorApp:
         self.create_filters_tab(filters_tab)
         self.create_transform_tab(transform_tab)
 
-    def configure_coordinate_value_data(self):
-        if not self.app:
-            self.app = xw.App(visible=True)
+    # endregion
 
-        self.wb = self.app.books.open(self.datasheet_path)
-        # self.wb = xw.Book(self.datasheet_path)
-        # the end goal here is to have a dict of pc_coordinate_values and td_coordinate_values each of which is just
-        # has values like 'A1':'LINE', 'B2':'Max Pressure'
-        td_combo_values = []
-        # Example values for the combo box
-        for key, value in self.td.items():
-            td_combo_values = list(value.keys())
-            print(list(td_combo_values))
-            break
+    # region Tab Creation
 
-        pc_combo_values = []
-        # Example values for the combo box
-        for key, value in self.pc.items():
-            pc_combo_values = list(value.keys())
-            print(list(pc_combo_values))
-            break
-
-        def clear_td():
-            self.td_coordinate_values = {}
-            update_td_listbox()
-
-        def clear_pc():
-            self.pc_coordinate_values = {}
-            update_pc_listbox()
-
-        def add_to_td():
-            key = key_entry.get()
-            td_value = td_combo.get()
-            # pc_value = pc_combo.get()
-
-            if key and td_value:
-                self.td_coordinate_values[key] = td_value
-                print("Added:", key, td_value)
-                # You can add further actions here or remove the print statement
-
-        def add_to_pc():
-            key = key_entry.get()
-            # td_value = td_combo.get()
-            pc_value = pc_combo.get()
-
-            if key and pc_value:
-                self.pc_coordinate_values[key] = pc_value
-                print("Added:", key, pc_value)
-                # You can add further actions here or remove the print statement
-
-        configure_window = tk.Toplevel(self.root)
-        configure_window.title("Configure Coordinate-Value Data")
-
-        # Frame to hold the key label and entry widgets
-        key_frame = ttk.Frame(configure_window)
-        key_frame.pack(fill="x", padx=10, pady=5)  # Adjust padx and pady as needed
-
-        # Key label
-        key_label = ttk.Label(key_frame, text="Enter Key Coordinate:\n(First entry is top tag default)")
-        key_label.pack(side="left")  # Pack label to the left within the frame
-
-        # Key entry with width set to span the window
-        entry_var = tk.StringVar()
-        key_entry = ttk.Entry(key_frame, textvariable=entry_var)
-        key_entry.pack(side="left", fill="x", expand=True)  # Pack entry to fill the available horizontal space
-
-        # Frame to hold the key label and entry widgets
-        listbox_frame = ttk.Frame(configure_window)
-        listbox_frame.pack(fill="x", padx=10, pady=5)  # Adjust padx and pady as needed
-
-        # Frame to hold the key label and entry widgets
-        td_frame = ttk.Frame(listbox_frame)
-        td_frame.pack(side="left", fill="x", expand=True, padx=5, pady=5)  # Adjust padx and pady as needed
-
-        xfn_button = tk.Button(listbox_frame, text='Transformation\nCode and Key', command=self.get_xkey)
-        xfn_button.pack(side='left')
-        # Frame to hold the key label and entry widgets
-        pc_frame = ttk.Frame(listbox_frame)
-        pc_frame.pack(side="left", fill="x", expand=True, padx=5, pady=5)  # Adjust padx and pady as needed
-
-        td_top_frame = ttk.Frame(td_frame)
-        td_top_frame.pack(fill="x", expand=True, padx=5, pady=5)
-        pc_top_frame = ttk.Frame(pc_frame)
-        pc_top_frame.pack(fill="x", expand=True, padx=5, pady=5)
-
-        # Combobox for td_combo_values
-        td_label = ttk.Label(td_top_frame, text="Select TD Value:")
-        td_label.pack(side='left')
-        td_combo = ttk.Combobox(td_top_frame, values=td_combo_values, state="readonly")
-        td_combo.pack(side="left", fill="x", expand=True, padx=5, pady=5)
-
-        # Combobox for pc_combo_values
-        pc_label = ttk.Label(pc_top_frame, text="Select PC Value:")
-        pc_label.pack(side='left')
-        pc_combo = ttk.Combobox(pc_top_frame, values=pc_combo_values, state="readonly")
-        pc_combo.pack(side="left", fill="x", expand=True, padx=5, pady=5)
-
-        td_listbox = tk.Listbox(td_frame)
-        td_listbox.pack(fill="x", expand=True, padx=5, pady=5)
-
-        pc_listbox = tk.Listbox(pc_frame)
-        pc_listbox.pack(fill="x", expand=True, padx=5, pady=5)
-
-        def update_td_listbox():
-            # Clear previous items
-            td_listbox.delete(0, tk.END)
-            # Populate list box with items from self.td_coordinate_values
-            for key, value in self.td_coordinate_values.items():
-                td_listbox.insert(tk.END, f"{key}: {value}")
-
-            first_entry = td_listbox.get(0)
-            print(first_entry)
-            try:
-                self.top_tag = first_entry.split(':')[0]
-            except:
-                print('failed to set top_tag')
-
-        def update_pc_listbox():
-            # Clear previous items
-            pc_listbox.delete(0, tk.END)
-            # Populate list box with items from self.pc_coordinate_values
-            for key, value in self.pc_coordinate_values.items():
-                pc_listbox.insert(tk.END, f"{key}: {value}")
-
-        # Function to update both list boxes
-        def update_listboxes():
-            update_td_listbox()
-            update_pc_listbox()
-
-        # Call update_listboxes initially to populate the list boxes
-        update_listboxes()
-
-        # Add buttons for TD and PC
-        add_td_button = ttk.Button(td_frame, text="Add to TD",
-                                   command=lambda: [add_to_td(), update_td_listbox()])
-        add_td_button.pack(side='right', padx=10)
-
-        add_pc_button = ttk.Button(pc_frame, text="Add to PC",
-                                   command=lambda: [add_to_pc(), update_pc_listbox()])
-        add_pc_button.pack(side='right', padx=10)
-
-        # Function to remove item from self.td_coordinate_values
-        def remove_from_td():
-            selected_index = td_listbox.curselection()
-            if selected_index:
-                key_to_remove = list(self.td_coordinate_values.keys())[selected_index[0]]
-                del self.td_coordinate_values[key_to_remove]
-                update_td_listbox()
-
-        # Function to remove item from self.pc_coordinate_values
-        def remove_from_pc():
-            selected_index = pc_listbox.curselection()
-            if selected_index:
-                key_to_remove = list(self.pc_coordinate_values.keys())[selected_index[0]]
-                del self.pc_coordinate_values[key_to_remove]
-                update_pc_listbox()
-
-        # Remove from TD button
-        remove_td_button = ttk.Button(td_frame, text="Remove from TD", command=remove_from_td)
-        remove_td_button.pack(side='right', padx=10)
-
-        # Remove from PC button
-        remove_pc_button = ttk.Button(pc_frame, text="Remove from PC", command=remove_from_pc)
-        remove_pc_button.pack(side='right', padx=10)
-
-        # Remove from TD button
-        clear_td_button = ttk.Button(td_frame, text="Clear All TD", command=clear_td)
-        clear_td_button.pack(side='right', padx=10)
-
-        # Remove from PC button
-        clear_pc_button = ttk.Button(pc_frame, text="Clear All PC", command=clear_pc)
-        clear_pc_button.pack(side='right', padx=10)
-
-        def update_entry():
-            current_selection = xw.apps.active.selection.address
-            current_selection = current_selection.split(':')[0]
-            current_selection = current_selection.replace('$', '')
-            entry_var.set(current_selection)
-            root.after(200, update_entry)
-
-        configure_window.after(200, update_entry)
-
-        def on_configure_window_close():
-            try:
-                app.quit()
-            except Exception as e:
-                print(f"Error closing Excel: {e}")
-            finally:
-                configure_window.destroy()
-
-        # Add this to your configure_window setup
-        # configure_window.protocol("WM_DELETE_WINDOW", on_configure_window_close)
+    def init_excel(self):
+        """Initialize Excel only when needed"""
+        if self.datasheet_path:
+            self.excel_mgr.open_workbook(self.datasheet_path)
 
     def create_coordinates_tab(self, tab):
-        def init_excel():
-            if not self.app:
-                self.app = xw.App(visible=True)
-            if self.datasheet_path:
-                self.wb = self.app.books.open(self.datasheet_path)
 
         def get_combo_values():
             td_values = []
@@ -451,14 +267,14 @@ class DatasheetGeneratorApp:
             update_pc_listbox()
 
         def reinitialize():
-            init_excel()
+            #init_excel()
             td_values, pc_values = get_combo_values()
             td_combo['values'] = td_values
             pc_combo['values'] = pc_values
             update_listboxes()
 
         # Initial Excel setup if path exists
-        init_excel()
+        #init_excel()
         td_combo_values, pc_combo_values = get_combo_values()
 
         # UI Setup (same as before)
@@ -534,6 +350,7 @@ class DatasheetGeneratorApp:
         # Expose reinitialize method for external calls
         tab.reinitialize = reinitialize
         return tab
+
     def create_datasheet_tab(self, tab):
         fields = [
             ("Source Sheet Name", "source_sheet_name", ttk.Combobox),
@@ -580,7 +397,6 @@ class DatasheetGeneratorApp:
         for key, value in self.td.items():
             td_combo_values = list(value.keys())
             break
-
 
         def add_filter_row(name='', filter_value=''):
             new_row = len(filters_entries) + 1
@@ -655,7 +471,6 @@ class DatasheetGeneratorApp:
 
         ttk.Button(tab, text="Save", command=save_transform).pack(pady=5)
 
-
     def refresh_tab_content(self):
         # Recreate all tabs with updated data
         for tab in self.notebook.winfo_children():
@@ -676,25 +491,72 @@ class DatasheetGeneratorApp:
         self.create_filters_tab(filters_tab)
         self.create_transform_tab(transform_tab)
 
+    # endregion
 
-    def get_sheet_names(self):
-        if not self.datasheet_path:
-            return []
-        try:
-            wb = openpyxl.load_workbook(self.datasheet_path, read_only=True)
-            return wb.sheetnames
-        except Exception as e:
-            print(f"Error getting sheet names: {e}")
-            return []
+    # region Configuration Windows
 
-    def update_pc_keys(self):
-        code = askstring("Enter transformation code", "Enter transformation code", initialvalue='"-".join(x.split("-")[-2:])')
-        self.pc = transform_dictionary(self.pc, code)
+    def configure_tag_data(self):
+        self.configure_list("Tag Data Headers", self.td_headers)
 
-    def delete_added_sheets(self):
-        for sheet in self.new_sheets:
-            self.wb.sheets[sheet].delete()
+    def configure_process_conditions(self):
+        self.configure_list("Process Conditions Headers", self.pc_headers)
 
+    def configure_list(self, desc, headers):
+        configure_window = tk.Toplevel(self.root)
+        configure_window.title(desc)
+        configure_window.geometry("320x320")
+
+        # Create a copy of the original list
+        original_headers = headers.copy()
+
+        # Function to add an item to headers
+        def add_item():
+            new_item = entry.get()
+            if new_item:
+                original_headers.append(new_item)
+                update_listbox()
+
+        # Function to remove the selected item from headers
+        def remove_item():
+            selected_index = listbox.curselection()
+            if selected_index:
+                index = selected_index[0]
+                del original_headers[index]
+                update_listbox()
+
+        # Function to update the listbox with headers
+        def update_listbox():
+            listbox.delete(0, tk.END)
+            for item in original_headers:
+                listbox.insert(tk.END, item)
+
+        # Function to save changes to the original list
+        def save_changes(headers):
+            headers.clear()  # Clear the original headers list
+            headers.extend(original_headers)  # Update the original list with modified headers
+            configure_window.destroy()  # Close the window after saving changes
+
+        # Creating GUI elements
+        entry_frame = tk.Frame(configure_window)
+        entry_frame.pack(fill=tk.X)
+
+        entry = tk.Entry(entry_frame)
+        entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        add_button = tk.Button(entry_frame, text="Add Item", command=add_item)
+        add_button.pack(side=tk.RIGHT)
+
+        listbox = tk.Listbox(configure_window)
+        listbox.pack(fill=tk.BOTH, expand=True)
+
+        remove_button = tk.Button(configure_window, text="Remove Item", command=remove_item)
+        remove_button.pack(fill=tk.X)
+
+        save_button = tk.Button(configure_window, text="Save", command=lambda: save_changes(headers))
+        save_button.pack(fill=tk.X)
+
+        # Update the listbox initially if headers has items
+        update_listbox()
 
     def get_xkey(self):
         xkey_window = tk.Toplevel(self.root)
@@ -751,69 +613,6 @@ class DatasheetGeneratorApp:
 
         # Run the tkinter main loop
         xkey_window.mainloop()
-
-    def configure_add_datasheet(self):
-        configure_window = tk.Toplevel()
-        configure_window.title("Configure Add Datasheet")
-
-        # Function to update attributes with values from Entry widgets
-        def update_attributes():
-            self.source_sheet_name = source_sheet_name_entry.get()
-            # Convert string input to tuple for datasheet coordinates
-            self.datasheet_coord = datasheet_coord_entry.get()
-
-            self.ds_str = ds_str_entry.get()
-            self.tag_pattern = tag_pattern_entry.get()
-            self.top_tag = top_tag_entry.get()
-            # Convert string input to integer for rows per sheet
-            try:
-                self.rows_per_sheet = int(rows_per_sheet_entry.get())
-            except ValueError:
-                # Handle incorrect input gracefully (e.g., default to 0)
-                self.rows_per_sheet = 0
-
-            # Close the configuration window after updating attributes
-            configure_window.destroy()
-
-        sn = []
-        try:
-            wb = openpyxl.load_workbook(self.datasheet_path, read_only=True)
-            sn = wb.sheetnames
-        except Exception as e:
-            print(e)
-
-        tk.Label(configure_window, text="Source Sheet Name:").pack(anchor='sw', pady=(10, 2))
-        source_sheet_name_entry = ttk.Combobox(configure_window, values=sn)
-        source_sheet_name_entry.insert(tk.END, self.source_sheet_name)
-        source_sheet_name_entry.pack(fill='x')
-
-        tk.Label(configure_window, text="Datasheet Coordinates:").pack(anchor='sw', pady=(10, 2))
-        datasheet_coord_entry = tk.Entry(configure_window)
-        datasheet_coord_entry.insert(tk.END, self.datasheet_coord)  # Display current row value
-        datasheet_coord_entry.pack(fill='x')
-
-        tk.Label(configure_window, text="Datasheet String:").pack(anchor='sw', pady=(10, 2))
-        ds_str_entry = tk.Entry(configure_window)
-        ds_str_entry.insert(tk.END, self.ds_str)
-        ds_str_entry.pack(fill='x')
-
-        tk.Label(configure_window, text="Tag Pattern (Regex):").pack(anchor='sw', pady=(10, 2))
-        tag_pattern_entry = tk.Entry(configure_window)
-        tag_pattern_entry.insert(tk.END, self.tag_pattern)
-        tag_pattern_entry.pack(fill='x')
-
-        tk.Label(configure_window, text="Top Tag Coordinate:").pack(anchor='sw', pady=(10, 2))
-        top_tag_entry = tk.Entry(configure_window)
-        top_tag_entry.insert(tk.END, str(self.top_tag))  # Display current rows per sheet value
-        top_tag_entry.pack(fill='x')
-
-        tk.Label(configure_window, text="Rows per Sheet:").pack(anchor='sw', pady=(10, 2))
-        rows_per_sheet_entry = tk.Entry(configure_window)
-        rows_per_sheet_entry.insert(tk.END, str(self.rows_per_sheet))  # Display current rows per sheet value
-        rows_per_sheet_entry.pack(fill='x')
-
-        # Button to update attributes
-        tk.Button(configure_window, text="Save", command=update_attributes).pack(pady=(10, 2))
 
     def set_tag_filters(self):
         view_window = tk.Toplevel(self.root)
@@ -878,14 +677,9 @@ class DatasheetGeneratorApp:
 
         view_window.mainloop()
 
-    def open_excel_search_app(self):
-        # Instantiate and show the ExcelSearchApp
-        excel_search_app = ExcelSearchApp()
-        excel_search_app.mainloop()
+    # endregion
 
-    def open_edit_xlsx(self):
-        edit_xlsx_window = tk.Toplevel(self.root)
-        ExcelEditorApp(edit_xlsx_window)
+    # region Data Generation and Processing
 
     def generate_process_conditions(self):
         # print("Generating Process Conditions. Make sure there isn't a blank row between header and first entry!")
@@ -946,6 +740,7 @@ class DatasheetGeneratorApp:
         print("Coordinate Values generated:", self.tag_cell_values)
 
     def add_datasheets(self):
+
         print('assigining tag coordinates')
         self.assign_value_coordinate_to_tag()
         print("Adding Datasheets")
@@ -958,148 +753,150 @@ class DatasheetGeneratorApp:
         print(f'rows_per_sheet: {self.rows_per_sheet}')
         # add_datasheets2 has a key coordinate add_datasheets doesn't
 
-        if not self.app:
-            self.app = xw.App(visible=True)
-        self.wb = self.app.books.open(self.datasheet_path)
-        print('opened ',self.datasheet_path)
-        print('sheet', self.wb.sheets[self.source_sheet_name])
-        self.new_sheets = add_datasheets(self.wb, self.source_sheet_name, self.tag_cell_values, self.datasheet_coord,
-                        self.ds_str, rows_per_sheet=self.rows_per_sheet, key_coordinate=self.top_tag)
+        # Open the workbook if not already open
+        if not self.excel_mgr.wb:
+            self.init_excel()
 
-        # self.wb.close()
+        print('opened ', self.datasheet_path)
+        print('sheet', self.excel_mgr.wb.sheets[self.source_sheet_name])
+
+        self.new_sheets = add_datasheets(self.excel_mgr.wb, self.source_sheet_name,
+                                       self.tag_cell_values, self.datasheet_coord,
+                                       self.ds_str, rows_per_sheet=self.rows_per_sheet,
+                                       key_coordinate=self.top_tag)
+
+        self.excel_mgr.mark_as_modified()
         print("DONE")
 
-    def save_and_close_workbook(self):
-        """
-        Save and close an xlwings workbook
+    def update_datasheet(self):
+        update_datasheets(self.datasheet_path, self.tag_cell_values, self.ds_str, self.rows_per_sheet,
+                          key_coordinate=self.top_tag)
 
-        Args:
-            wb: xlwings Workbook object
-            filepath: Optional path to save the file. If None, saves in current location
-        """
+    # endregion
+
+    # region Data Loading and Saving
+
+    def load_settings(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Settings files", "*.json *.pkl"), ("JSON files", "*.json"), ("Pickle files", "*.pkl")]
+        )
+
+        if not file_path:
+            return
+
         try:
+            file_ext = os.path.splitext(file_path)[1].lower()
+            with open(file_path, 'rb' if file_ext == '.pkl' else 'r') as file:
+                settings_data = pickle.load(file) if file_ext == '.pkl' else json.load(file)
 
-            self.wb.save()
-            self.wb.close()
-            self.wb = None
-            print('ran save an close')
+                for key, value in settings_data.items():
+                    if key in self.parameters:
+                        setattr(self, key, value)
+
+                # Force tab content refresh
+                self.refresh_tab_content()
+                self.update_entries()
+                print(f"Settings loaded successfully from {file_ext} file!")
+
         except Exception as e:
-            print('error saving workbook ', e)
+            print(f"Error loading settings: {e}")
 
-    def update_entry(self, entry, variable):
-        filename = ''
-        if variable == "process_conditions":
-            filename = self.process_conditions_path
-        elif variable == "tag_data":
-            filename = self.tag_data_path
-        elif variable == "coordinate_value":
-            filename = self.coordinate_value_path
-        elif variable == "datasheets":
-            filename = self.datasheet_path
+    def load_settings_except_td_pc(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Settings files", "*.json *.pkl"), ("JSON files", "*.json"), ("Pickle files", "*.pkl")]
+        )
 
-        entry.delete(0, tk.END)
-        entry.insert(0, filename)
+        if not file_path:
+            return
 
-    def update_entries(self):
-        for entry, entry_var in self.entries:
-            try:
-                self.update_entry(entry, entry_var)
-                entry.xview_moveto(1)
-            except Exception as e:
-                print(f'error {e}')
+        # Define excluded parameters
+        excluded_params = {'td', 'pc'}
 
-    def browse(self, entry, variable):
-        filename = filedialog.askopenfilename()
-        entry.delete(0, tk.END)
-        entry.insert(0, filename)
+        try:
+            file_ext = os.path.splitext(file_path)[1].lower()
+            with open(file_path, 'rb' if file_ext == '.pkl' else 'r') as file:
+                settings_data = pickle.load(file) if file_ext == '.pkl' else json.load(file)
 
-        if variable == "process_conditions":
-            self.process_conditions_path = filename
-        elif variable == "tag_data":
-            self.tag_data_path = filename
-        elif variable == "coordinate_value":
-            self.coordinate_value_path = filename
-        elif variable == "datasheets":
-            self.datasheet_path = filename
-            print(self.datasheet_path)
+                for key, value in settings_data.items():
+                    if key in self.parameters and key not in excluded_params:
+                        setattr(self, key, value)
 
-    def configure(self, text):
-        print(f"Configure {text}")
+                # Force tab content refresh
+                self.refresh_tab_content()
+                self.update_entries()
+                print(f"Settings loaded successfully from {file_ext} file!")
 
-        if text == 'Instrument Index':
-            self.configure_tag_data()
+        except Exception as e:
+            print(f"Error loading settings: {e}")
 
-        if text == 'Process Conditions':
-            self.configure_process_conditions()
+    def save_settings(self, use_pickle=True):
+        """
+        Saves settings to either JSON or pickle file.
+        Args:
+            use_pickle (bool): If True, saves as pickle file. Use only if JSON serialization fails.
+        """
 
-        if text == 'Coordinate-Value Data':
-            self.configure_ds()
+        file_ext = ".pkl" if use_pickle else ".json"
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=file_ext,
+            filetypes=[("Settings files", f"*{file_ext}")]
+        )
 
-        if text == 'Datasheets':
-            self.configure_ds()
+        if not file_path:
+            return
 
-    def configure_tag_data(self):
-        self.configure_list("Tag Data Headers", self.td_headers)
+        settings_to_save = {}
+        for key in self.parameters:
+            value = getattr(self, key)
+            settings_to_save[key] = value
 
-    def configure_process_conditions(self):
-        self.configure_list("Process Conditions Headers", self.pc_headers)
+        try:
+            if use_pickle:
+                with open(file_path, 'wb') as file:
+                    pickle.dump(settings_to_save, file)
+            else:
+                with open(file_path, 'w') as file:
+                    json.dump(settings_to_save, file, indent=4)
 
-    def configure_list(self, desc, headers):
-        configure_window = tk.Toplevel(self.root)
-        configure_window.title(desc)
-        configure_window.geometry("320x320")
+            print(f"Settings saved successfully as {file_ext}!")
 
-        # Create a copy of the original list
-        original_headers = headers.copy()
+        except TypeError as e:
+            if not use_pickle:
+                print(f"JSON serialization failed: {e}")
+                print("Try saving as pickle file instead.")
+            else:
+                print(f"Pickle serialization failed: {e}")
+        except Exception as e:
+            print(f"Error occurred while saving settings: {e}")
 
-        # Function to add an item to headers
-        def add_item():
-            new_item = entry.get()
-            if new_item:
-                original_headers.append(new_item)
-                update_listbox()
+    def load_td_from_datasheet(self):
+        def set_td(td):
+            self.td = td
 
-        # Function to remove the selected item from headers
-        def remove_item():
-            selected_index = listbox.curselection()
-            if selected_index:
-                index = selected_index[0]
-                del original_headers[index]
-                update_listbox()
+        app_window = tk.Toplevel(root)
+        DatasheetExtractor(app_window, callback=set_td)
 
-        # Function to update the listbox with headers
-        def update_listbox():
-            listbox.delete(0, tk.END)
-            for item in original_headers:
-                listbox.insert(tk.END, item)
+    def load_pc_from_datasheet(self):
+        def set_pc(pc):
+            self.pc = pc
 
-        # Function to save changes to the original list
-        def save_changes(headers):
-            headers.clear()  # Clear the original headers list
-            headers.extend(original_headers)  # Update the original list with modified headers
-            configure_window.destroy()  # Close the window after saving changes
+        app_window = tk.Toplevel(root)
+        DatasheetExtractor(app_window, callback=set_pc)
 
-        # Creating GUI elements
-        entry_frame = tk.Frame(configure_window)
-        entry_frame.pack(fill=tk.X)
+    def load_td_from_json(self):
+        # use tkinter to ask for the json file path
+        # use load_dict_from_json(file_path) to set self.td
+        # Ask the user to select a JSON file
+        file_path = filedialog.askopenfilename(title="Select JSON file", filetypes=[("JSON files", "*.json")])
 
-        entry = tk.Entry(entry_frame)
-        entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        # Check if a file was selected
+        if file_path:
+            # Load the JSON file using load_dict_from_json
+            self.td = load_dict_from_json(file_path)
 
-        add_button = tk.Button(entry_frame, text="Add Item", command=add_item)
-        add_button.pack(side=tk.RIGHT)
+    # endregion
 
-        listbox = tk.Listbox(configure_window)
-        listbox.pack(fill=tk.BOTH, expand=True)
-
-        remove_button = tk.Button(configure_window, text="Remove Item", command=remove_item)
-        remove_button.pack(fill=tk.X)
-
-        save_button = tk.Button(configure_window, text="Save", command=lambda: save_changes(headers))
-        save_button.pack(fill=tk.X)
-
-        # Update the listbox initially if headers has items
-        update_listbox()
+    # region Data Display
 
     def view_data(self, text):
 
@@ -1174,131 +971,132 @@ class DatasheetGeneratorApp:
 
         scrolled_text1.configure(state='disabled')  # Make
 
-    def load_settings(self):
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Settings files", "*.json *.pkl"), ("JSON files", "*.json"), ("Pickle files", "*.pkl")]
-        )
+    def display_coordinate_values(self):
 
-        if not file_path:
-            return
+        # Create a new window
+        view_window = tk.Toplevel(self.root)
+        view_window.title("Coordinate values")
 
+        td_label = tk.Label(view_window, text='Index Tag data Coordinates')
+        scrolled_text1 = scrolledtext.ScrolledText(view_window, width=40, height=20)
+        td_label.pack()
+        scrolled_text1.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)  # Fill and expand to fill the window
+
+        # Display the process conditions content in the scrolled text widget
+        if self.tag_cell_values:
+            for key, value in self.tag_cell_values.items():
+                scrolled_text1.insert(tk.END, f"{key}: {value}\n\n")
+        else:
+            scrolled_text1.insert(tk.END, "No tag data available.")
+
+        scrolled_text1.configure(state='disabled')  # Make
+
+    # endregion
+
+    # region Excel Operations
+
+    def save_and_close_workbook(self):
+        """Save and close the current workbook"""
+        self.excel_mgr.close_workbook()
+
+    def delete_added_sheets(self):
+        if self.excel_mgr.wb:
+            for sheet in self.new_sheets:
+                self.excel_mgr.wb.sheets[sheet].delete()
+            self.excel_mgr.mark_as_modified()
+
+    def open_excel_search_app(self):
+        # Instantiate and show the ExcelSearchApp
+        excel_search_app = ExcelSearchApp()
+        excel_search_app.mainloop()
+
+    def open_edit_xlsx(self):
+        edit_xlsx_window = tk.Toplevel(self.root)
+        ExcelEditorApp(edit_xlsx_window)
+
+    def get_sheet_names(self):
+        if not self.datasheet_path:
+            return []
         try:
-            file_ext = os.path.splitext(file_path)[1].lower()
-            with open(file_path, 'rb' if file_ext == '.pkl' else 'r') as file:
-                settings_data = pickle.load(file) if file_ext == '.pkl' else json.load(file)
-
-                for key, value in settings_data.items():
-                    if key in self.parameters:
-                        setattr(self, key, value)
-
-                # Force tab content refresh
-                self.refresh_tab_content()
-                self.update_entries()
-                print(f"Settings loaded successfully from {file_ext} file!")
-
+            wb = openpyxl.load_workbook(self.datasheet_path, read_only=True)
+            return wb.sheetnames
         except Exception as e:
-            print(f"Error loading settings: {e}")
+            print(f"Error getting sheet names: {e}")
+            return []
 
-    def load_settings_except_td_pc(self):
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Settings files", "*.json *.pkl"), ("JSON files", "*.json"), ("Pickle files", "*.pkl")]
-        )
-
-        if not file_path:
-            return
-
-        # Define excluded parameters
-        excluded_params = {'td', 'pc'}
-
-        try:
-            file_ext = os.path.splitext(file_path)[1].lower()
-            with open(file_path, 'rb' if file_ext == '.pkl' else 'r') as file:
-                settings_data = pickle.load(file) if file_ext == '.pkl' else json.load(file)
-
-                for key, value in settings_data.items():
-                    if key in self.parameters and key not in excluded_params:
-                        setattr(self, key, value)
-
-                # Force tab content refresh
-                self.refresh_tab_content()
-                self.update_entries()
-                print(f"Settings loaded successfully from {file_ext} file!")
-
-        except Exception as e:
-            print(f"Error loading settings: {e}")
+    def on_closing(self):
+        """Handle application closing"""
+        if self.excel_mgr.is_dirty:
+            if messagebox.askyesno("Save Changes",
+                                 "There are unsaved changes. Would you like to save before closing?"):
+                self.excel_mgr.save_workbook()
+        self.excel_mgr.cleanup()
+        self.root.destroy()
 
 
-    def save_settings(self, use_pickle=True):
-        """
-        Saves settings to either JSON or pickle file.
-        Args:
-            use_pickle (bool): If True, saves as pickle file. Use only if JSON serialization fails.
-        """
-        file_ext = ".pkl" if use_pickle else ".json"
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=file_ext,
-            filetypes=[("Settings files", f"*{file_ext}")]
-        )
+    # endregion
 
-        if not file_path:
-            return
+    # region UI Utilities
 
-        settings_to_save = {}
-        for key in self.parameters:
-            value = getattr(self, key)
-            settings_to_save[key] = value
+    def update_entry(self, entry, variable):
+        filename = ''
+        if variable == "process_conditions":
+            filename = self.process_conditions_path
+        elif variable == "tag_data":
+            filename = self.tag_data_path
+        elif variable == "coordinate_value":
+            filename = self.coordinate_value_path
+        elif variable == "datasheets":
+            filename = self.datasheet_path
 
-        try:
-            if use_pickle:
-                with open(file_path, 'wb') as file:
-                    pickle.dump(settings_to_save, file)
-            else:
-                with open(file_path, 'w') as file:
-                    json.dump(settings_to_save, file, indent=4)
+        entry.delete(0, tk.END)
+        entry.insert(0, filename)
 
-            print(f"Settings saved successfully as {file_ext}!")
+    def update_entries(self):
+        for entry, entry_var in self.entries:
+            try:
+                self.update_entry(entry, entry_var)
+                entry.xview_moveto(1)
+            except Exception as e:
+                print(f'error {e}')
 
-        except TypeError as e:
-            if not use_pickle:
-                print(f"JSON serialization failed: {e}")
-                print("Try saving as pickle file instead.")
-            else:
-                print(f"Pickle serialization failed: {e}")
-        except Exception as e:
-            print(f"Error occurred while saving settings: {e}")
+    def browse(self, entry, variable):
+        filename = filedialog.askopenfilename()
+        entry.delete(0, tk.END)
+        entry.insert(0, filename)
 
-    def load_td_from_datasheet(self):
-        def set_td(td):
-            self.td = td
+        if variable == "process_conditions":
+            self.process_conditions_path = filename
+        elif variable == "tag_data":
+            self.tag_data_path = filename
+        elif variable == "coordinate_value":
+            self.coordinate_value_path = filename
+        elif variable == "datasheets":
+            self.datasheet_path = filename
+            print(self.datasheet_path)
 
-        app_window = tk.Toplevel(root)
-        DatasheetExtractor(app_window, callback=set_td)
+    def configure(self, text):
+        print(f"Configure {text}")
 
-    def load_pc_from_datasheet(self):
-        def set_pc(pc):
-            self.pc = pc
+        if text == 'Instrument Index':
+            self.configure_tag_data()
 
-        app_window = tk.Toplevel(root)
-        DatasheetExtractor(app_window, callback=set_pc)
+        if text == 'Process Conditions':
+            self.configure_process_conditions()
 
-    def load_td_from_json(self):
-        # use tkinter to ask for the json file path
-        # use load_dict_from_json(file_path) to set self.td
-        # Ask the user to select a JSON file
-        file_path = filedialog.askopenfilename(title="Select JSON file", filetypes=[("JSON files", "*.json")])
+        if text == 'Datasheets':
+            self.configure_ds()
 
-        # Check if a file was selected
-        if file_path:
-            # Load the JSON file using load_dict_from_json
-            self.td = load_dict_from_json(file_path)
-
-    def update_datasheet(self):
-        update_datasheets(self.datasheet_path, self.tag_cell_values, self.ds_str, self.rows_per_sheet,
-                          key_coordinate=self.top_tag)
+    def update_pc_keys(self):
+        code = askstring("Enter transformation code for keys in dictionary", "Enter transformation code",
+                         initialvalue='"-".join(x.split("-")[-2:])')
+        self.pc = transform_dictionary(self.pc, code)
 
     def configure_ds(self):
+        self.init_excel()
         self.refresh_tab_content()
         self.update_entries()
+    # endregion
 
 
 if __name__ == "__main__":

@@ -4,6 +4,11 @@ import json
 from tkinter import messagebox
 from math import log10, floor
 
+
+# Standalone Functions
+
+# region Data Transformation
+
 def transform_dictionary(input_dict, transformation_code):
     """
     Transform all keys in a dictionary using the provided transformation code.
@@ -42,6 +47,18 @@ def try_round_to_sigfigs(num, sig_figs=4, tolerance=1e-2):
 
     return rounded
 
+def translate(input_string, transformation_code):
+    try:
+        x_fn = eval(f'lambda x: {transformation_code}')
+        transformed_string = x_fn(input_string)
+        return transformed_string
+    except Exception as e:
+        print(f'error applying transformation: {e}')
+        return input_string
+# endregion
+
+# region Excel Cell Operations
+
 def find_cells(sheet, search_terms):
     cells = []
     concat_pairs = {}
@@ -73,25 +90,72 @@ def find_cells(sheet, search_terms):
 
     return cells, concat_cells
 
+def find_cells_old(sheet, search_terms):
+    cells = []
+    # Find the row in the sheet that contains any of the specified search terms
+    for term in search_terms:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if cell.value and term.lower() == str(cell.value).lower():
+                    cells.append(cell)
+    return cells
 
-def process_sheet(sheet, headers):
-    header_cells, concat_pairs = find_cells(sheet, headers)
-    tables = []
+def get_value_above(sheet, row, col):
+    """Get value from merged cell above or regular cell."""
+    current_row = row
+    while current_row > 1:
+        current_row -= 1
+        for range_string in sheet.merged_cells.ranges:
+            min_col, min_row, max_col, max_row = range_string.bounds
+            if (min_row <= current_row <= max_row and
+                min_col <= col <= max_col):
+                print('mereged cell ', sheet.cell(min_row, min_col).value)
+                return sheet.cell(min_row, min_col).value
+        cell_value = sheet.cell(row=current_row, column=col).value
+        if cell_value is not None:
+            return cell_value
+    return None
 
-    for cell in header_cells:
-        table_length = get_table_length_rows(sheet, cell)
-        left_col, right_col = get_table_cols(sheet, cell)
+def increment_cell_reference(cell_ref, increment):
+    col = ''.join(filter(str.isalpha, cell_ref))
+    row = int(''.join(filter(str.isdigit, cell_ref)))
+    return f"{col}{row + increment}"
+# endregion
 
-        table_dict_list = table_to_list(sheet, cell.row, left_col, cell.row + table_length, right_col)
+# region Table Processing
 
-        original_header = next(h for h in headers if h.lower() == cell.value.lower() or
-                               ('+' in h and h.split('+')[0].lower() == cell.value.lower()))
+def table_to_list(sheet, start_row, start_col, end_row, end_col, column_headers=False):
+    matrix = []
+    for row in sheet.iter_rows(min_row=start_row, max_row=end_row,
+                             min_col=start_col, max_col=end_col,
+                             values_only=False):
+        row_values = [cell.value for cell in row]
+        matrix.append(row_values)
 
-        tag_dict = list_to_tag_dict(table_dict_list, original_header)
-        tables.append(tag_dict)
+    headers = matrix.pop(0)
+    modified_headers = headers.copy()
 
-    return tables
+    # Handle duplicates considering merged cells
+    header_counts = {}
+    for i, header in enumerate(headers):
+        if header is None:
+            continue
+        header_counts[header] = header_counts.get(header, 0) + 1
 
+    for i, header in enumerate(headers):
+        if header_counts[header] > 1:
+            col_index = start_col + i
+            print(sheet.cell(start_row-1, col_index).value)
+            above_value = get_value_above(sheet, start_row, col_index)
+            if above_value:
+                modified_headers[i] = f"{above_value}_{header}"
+
+    table_list = []
+    for row in matrix:
+        row_dict = dict(zip(modified_headers, row))
+        table_list.append(row_dict)
+
+    return table_list
 
 def list_to_tag_dict(table_list, tag):
     tag_dict = {}
@@ -120,16 +184,67 @@ def list_to_tag_dict(table_list, tag):
 
     return tag_dict
 
+def get_table_length_rows(sheet, header_cell):
+    start_row = header_cell.row + 1
+    end_value = header_cell.value
+    max_row = sheet.max_row
+    current_row = start_row
+    # Initialize table_length to 0
+    table_length = 0
 
-def find_cells_old(sheet, search_terms):
-    cells = []
-    # Find the row in the sheet that contains any of the specified search terms
-    for term in search_terms:
-        for row in sheet.iter_rows():
-            for cell in row:
-                if cell.value and term.lower() == str(cell.value).lower():
-                    cells.append(cell)
-    return cells
+    # Use iter_rows to iterate over rows starting from the row after the header
+    for row in sheet.iter_rows(min_row=start_row, values_only=True):
+        current_value = row[header_cell.column - 1]  # Adjusting for zero-based indexing
+
+        # Break the loop if an empty cell is encountered or if the current value matches the end value
+        if current_row >= max_row or current_value == end_value:
+            break
+
+        current_row += 1
+        table_length += 1
+
+    return table_length
+
+def get_table_cols(sheet, header_cell):
+    start_col = header_cell.column
+    end_value = header_cell.value
+    row = header_cell.row
+
+    # Find the leftmost column
+    left_col = start_col
+    for col in range(start_col - 1, 0, -1):
+        if sheet.cell(row=row, column=col).value is None:
+            break
+        left_col = col
+
+    # Find the rightmost column
+    right_col = start_col
+    for col in range(start_col + 1, sheet.max_column + 1):
+        cell_value = sheet.cell(row=row, column=col).value
+        if cell_value is None or cell_value == end_value:
+            right_col = col - 1
+            break
+        right_col = col
+
+    return left_col, right_col
+
+def process_sheet(sheet, headers):
+    header_cells, concat_pairs = find_cells(sheet, headers)
+    tables = []
+
+    for cell in header_cells:
+        table_length = get_table_length_rows(sheet, cell)
+        left_col, right_col = get_table_cols(sheet, cell)
+
+        table_dict_list = table_to_list(sheet, cell.row, left_col, cell.row + table_length, right_col)
+
+        original_header = next(h for h in headers if h.lower() == cell.value.lower() or
+                               ('+' in h and h.split('+')[0].lower() == cell.value.lower()))
+
+        tag_dict = list_to_tag_dict(table_dict_list, original_header)
+        tables.append(tag_dict)
+
+    return tables
 
 def combine_tables(tables):
     if tables:
@@ -150,7 +265,9 @@ def combine_tables(tables):
                 print(f'Error: No match found for {tag}')
     print(tag_dict_combined)
     return tag_dict_combined
+# endregion
 
+# region Datasheet Management
 
 def get_unique_sheet_name(datasheet, ds_prefix, sheet_number):
     """Generate unique sheet name, incrementing suffix if needed"""
@@ -185,6 +302,11 @@ def add_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coor
     # Build dictionary of existing tags and their locations in workbook
     existing_tags = {}
     for sheet in datasheet.sheets:
+
+        # Skip the source/template sheet even if it matches the prefix
+        if sheet.name == source_sheet_name:
+            continue
+
         if sheet.name.startswith(ds_prefix) or ds_prefix == '':
             for i in range(rows_per_sheet):
                 offset_coord = increment_cell_reference(key_coordinate, i)
@@ -241,16 +363,6 @@ def add_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coor
 
     return list(added_sheets)  # Return list of all sheets we Added
 
-def translate(input_string, transformation_code):
-    try:
-        x_fn = eval(f'lambda x: {transformation_code}')
-        transformed_string = x_fn(input_string)
-        return transformed_string
-    except Exception as e:
-        print(f'error applying transformation: {e}')
-        return input_string
-
-
 def update_datasheets(datasheet_path, tag_cell_values, ds_prefix, rows_per_sheet=1, key_coordinate='I12'):
 
     datasheet = xw.Book(datasheet_path)
@@ -269,13 +381,9 @@ def update_datasheets(datasheet_path, tag_cell_values, ds_prefix, rows_per_sheet
                     for coord, value in coord_values.items():
                         current_coord = increment_cell_reference(coord,i)
                         sheet.range(current_coord).value = value
+# endregion
 
-                    #we need to update the values here and not later
-
-def increment_cell_reference(cell_ref, increment):
-    col = ''.join(filter(str.isalpha, cell_ref))
-    row = int(''.join(filter(str.isdigit, cell_ref)))
-    return f"{col}{row + increment}"
+# region Dictionary and JSON Operations
 
 def generate_dictionary_from_xlsx(wb_path, headers):
     wb = openpyxl.load_workbook(wb_path, read_only=False, data_only=True)
@@ -294,99 +402,6 @@ def generate_dictionary_from_xlsx(wb_path, headers):
             wb_tag_data.update(sheet_data)
 
     return wb_tag_data
-
-def get_value_above(sheet, row, col):
-    """Get value from merged cell above or regular cell."""
-    current_row = row
-    while current_row > 1:
-        current_row -= 1
-        for range_string in sheet.merged_cells.ranges:
-            min_col, min_row, max_col, max_row = range_string.bounds
-            if (min_row <= current_row <= max_row and
-                min_col <= col <= max_col):
-                print('mereged cell ', sheet.cell(min_row, min_col).value)
-                return sheet.cell(min_row, min_col).value
-        cell_value = sheet.cell(row=current_row, column=col).value
-        if cell_value is not None:
-            return cell_value
-    return None
-
-def table_to_list(sheet, start_row, start_col, end_row, end_col, column_headers=False):
-    matrix = []
-    for row in sheet.iter_rows(min_row=start_row, max_row=end_row,
-                             min_col=start_col, max_col=end_col,
-                             values_only=False):
-        row_values = [cell.value for cell in row]
-        matrix.append(row_values)
-
-    headers = matrix.pop(0)
-    modified_headers = headers.copy()
-
-    # Handle duplicates considering merged cells
-    header_counts = {}
-    for i, header in enumerate(headers):
-        if header is None:
-            continue
-        header_counts[header] = header_counts.get(header, 0) + 1
-
-    for i, header in enumerate(headers):
-        if header_counts[header] > 1:
-            col_index = start_col + i
-            print(sheet.cell(start_row-1, col_index).value)
-            above_value = get_value_above(sheet, start_row, col_index)
-            if above_value:
-                modified_headers[i] = f"{above_value}_{header}"
-
-    table_list = []
-    for row in matrix:
-        row_dict = dict(zip(modified_headers, row))
-        table_list.append(row_dict)
-
-    return table_list
-
-def get_table_length_rows(sheet, header_cell):
-    start_row = header_cell.row + 1
-    end_value = header_cell.value
-    max_row = sheet.max_row
-    current_row = start_row
-    # Initialize table_length to 0
-    table_length = 0
-
-    # Use iter_rows to iterate over rows starting from the row after the header
-    for row in sheet.iter_rows(min_row=start_row, values_only=True):
-        current_value = row[header_cell.column - 1]  # Adjusting for zero-based indexing
-
-        # Break the loop if an empty cell is encountered or if the current value matches the end value
-        if current_row >= max_row or current_value == end_value:
-            break
-
-        current_row += 1
-        table_length += 1
-
-    return table_length
-
-def get_table_cols(sheet, header_cell):
-    start_col = header_cell.column
-    end_value = header_cell.value
-    row = header_cell.row
-
-    # Find the leftmost column
-    left_col = start_col
-    for col in range(start_col - 1, 0, -1):
-        if sheet.cell(row=row, column=col).value is None:
-            break
-        left_col = col
-
-    # Find the rightmost column
-    right_col = start_col
-    for col in range(start_col + 1, sheet.max_column + 1):
-        cell_value = sheet.cell(row=row, column=col).value
-        if cell_value is None or cell_value == end_value:
-            right_col = col - 1
-            break
-        right_col = col
-
-    return left_col, right_col
 
 def load_dict_from_json(file_path):
     """
@@ -409,7 +424,9 @@ def load_dict_from_json(file_path):
         raise FileNotFoundError(f"The file {file_path} was not found.")
     except json.JSONDecodeError:
         raise json.JSONDecodeError(f"The file {file_path} is not valid JSON.")
+# endregion
 
+# region Analysis and Validation
 
 def analyze_nested_dict_keys(dict_of_dicts):
     if not dict_of_dicts:
@@ -445,7 +462,6 @@ def analyze_nested_dict_keys(dict_of_dicts):
         'inconsistencies': inconsistencies
     }
 
-
 def show_nested_dict_analysis(dict_of_dicts):
     result = analyze_nested_dict_keys(dict_of_dicts)
 
@@ -465,3 +481,4 @@ def show_nested_dict_analysis(dict_of_dicts):
                 message += f"  Extra keys: {', '.join(item['extra_keys'])}\n"
 
     messagebox.showinfo("Nested Dictionary Key Analysis Results", message)
+# endregion
