@@ -11,8 +11,8 @@ class ExcelManager:
     """
 
     def __init__(self):
-        self.app = None
         self.wb = None
+        self.app = None
         self.is_dirty = False
         self.original_path = None
         self.temp_path = None
@@ -66,30 +66,20 @@ class ExcelManager:
     def open_workbook(self, path):
         """Opens a workbook with special handling for network paths"""
         try:
-            if not self.app:
-                self.app = xw.App(visible=True)
-
-            # Close any open workbook first
-            if self.wb:
-                self.close_workbook()
-
-            self.original_path = path
-
-            # Handle network path
-            if self._is_network_path(path):
-                self.temp_path = self._create_temp_copy(path)
-                if self.temp_path:
-                    self.wb = self.app.books.open(self.temp_path)
-                else:
-                    raise Exception("Failed to create temporary copy")
-            else:
-                self.wb = self.app.books.open(path)
-
+            # Force close any existing connections
+            self.cleanup()
+            
+            # Create new Excel instance
+            self.app = xw.App(visible=True)
+            self.app.display_alerts = False
+            
+            # Open workbook
+            self.wb = self.app.books.open(path)
             self.is_dirty = False
-            return True
+            
         except Exception as e:
-            print(f"Error opening workbook: {e}")
-            return False
+            self.cleanup()
+            raise Exception(f"Failed to open workbook: {e}")
 
     def save_workbook(self):
         """Saves the workbook with special handling for network paths"""
@@ -128,22 +118,18 @@ class ExcelManager:
             return False
 
     def cleanup(self):
-        """Cleans up all Excel resources"""
+        """Clean up Excel resources"""
         try:
             if self.wb:
-                self.close_workbook()
+                self.wb.close()
             if self.app:
                 self.app.quit()
-                self.app = None
-
-            # Final cleanup of temp file if it still exists
-            if self.temp_path and os.path.exists(self.temp_path):
-                try:
-                    os.remove(self.temp_path)
-                except:
-                    pass
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
+        except:
+            pass
+        finally:
+            self.wb = None 
+            self.app = None
+            self.is_dirty = False
 
     def mark_as_modified(self):
         """Marks the workbook as having unsaved changes"""

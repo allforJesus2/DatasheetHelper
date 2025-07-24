@@ -1,4 +1,6 @@
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 from pathlib import Path
 from typing import List, Dict, Generator
 import pypdf
@@ -7,15 +9,47 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 import chromadb
 import tkinter as tk
-from tkinter import ttk, filedialog, scrolledtext
+from tkinter import ttk, filedialog, scrolledtext, messagebox, simpledialog
 import threading
 from datetime import datetime
 import nltk
 from nltk.tokenize import sent_tokenize
 import json
 
-nltk.download('punkt', quiet=True)
+# Fix the NLTK download to ensure all required resources are properly downloaded
+try:
+    # Download both punkt and punkt_tab resources
+    nltk.download('punkt', quiet=True)
+    try:
+        # Explicitly try to download punkt_tab if it exists
+        nltk.download('punkt_tab', quiet=True)
+    except:
+        pass
+except Exception as e:
+    print(f"Error downloading NLTK resources: {e}")
 
+# Define a robust fallback tokenizer regardless of download success
+def robust_sent_tokenize(text):
+    """Fallback tokenizer that doesn't rely on NLTK resources"""
+    # First try the standard NLTK tokenizer
+    try:
+        return sent_tokenize(text)
+    except Exception as e:
+        # If that fails, use our own simple implementation
+        print(f"Using fallback tokenizer due to: {e}")
+        # Split on common sentence endings with smart handling of abbreviations
+        text = text.replace('\n', ' ')
+        # Handle common abbreviations to avoid incorrect splits
+        for abbr in ['Mr.', 'Mrs.', 'Dr.', 'Ph.D.', 'e.g.', 'i.e.', 'etc.']:
+            text = text.replace(abbr, abbr.replace('.', '<DOT>'))
+        # Split on sentence boundaries
+        sentences = []
+        for s in text.replace('. ', '.<SPLIT>').replace('! ', '!<SPLIT>').replace('? ', '?<SPLIT>').split('<SPLIT>'):
+            # Restore abbreviation dots
+            s = s.replace('<DOT>', '.')
+            if s.strip():
+                sentences.append(s.strip())
+        return sentences
 
 class JsonResultsViewer:
     def __init__(self, results, parent=None):
@@ -108,7 +142,9 @@ class DocumentChunker:
         self.chunk_overlap = chunk_overlap
 
     def create_chunks(self, text: str) -> Generator[str, None, None]:
-        sentences = sent_tokenize(text)
+        # Use our robust tokenizer which handles errors internally
+        sentences = robust_sent_tokenize(text)
+        
         current_chunk = []
         current_length = 0
 
@@ -161,6 +197,7 @@ class DocumentVectorizerGUI:
         ttk.Entry(db_frame, textvariable=self.db_path).pack(side='left', fill='x', expand=True, padx=5)
         ttk.Button(db_frame, text="Browse DB", command=self.browse_db).pack(side='left')
         ttk.Button(db_frame, text="Load DB", command=self.load_database).pack(side='left', padx=5)
+        ttk.Button(db_frame, text="Create New DB", command=self.create_new_database).pack(side='left', padx=5)
 
         # Chunking options
         chunk_frame = ttk.LabelFrame(self.root, text="Chunking Options")
@@ -188,6 +225,9 @@ class DocumentVectorizerGUI:
         self.collections_dropdown = ttk.Combobox(folder_frame, textvariable=self.collection_name, state='readonly')
         self.collections_dropdown.pack(side='left')
         self.collections_dropdown.bind('<<ComboboxSelected>>', self.on_collection_select)
+        
+        # Add new collection button
+        ttk.Button(folder_frame, text="New Collection", command=self.create_new_collection).pack(side='left', padx=5)
 
         # Process button and progress
         self.process_btn = ttk.Button(self.root, text="Process Documents", command=self.start_processing)
@@ -280,8 +320,7 @@ class DocumentVectorizerGUI:
                 chunk_size=self.chunk_size.get(),
                 chunk_overlap=self.chunk_overlap.get()
             )
-            collections = self.vectorizer.chroma_client.list_collections()
-            collection_names = [c.name for c in collections]
+            collection_names = self.vectorizer.chroma_client.list_collections()
             self.collections_dropdown['values'] = collection_names
             if collection_names:
                 self.collections_dropdown.set(collection_names[0])
@@ -315,25 +354,21 @@ class DocumentVectorizerGUI:
         self.progress_var.set("Processing...")
 
         def process():
-            try:
-                if not self.vectorizer:
-                    self.vectorizer = DocumentVectorizer(
-                        self.folder_path.get(),
-                        db_path=self.db_path.get(),
-                        collection_name=self.collection_name.get(),
-                        chunk_size=self.chunk_size.get(),
-                        chunk_overlap=self.chunk_overlap.get()
-                    )
-                else:
-                    self.vectorizer.folder_path = Path(self.folder_path.get())
-                self.vectorizer.process_documents(callback=self.log_message)
-                # Remove the database reload since it's no longer needed
-                self.root.after(0, lambda: self.progress_var.set("Ready"))
-                self.root.after(0, lambda: self.process_btn.config(state='normal'))
-            except Exception as e:
-                self.root.after(0, lambda: self.log_message(f"Error: {str(e)}"))
-                self.root.after(0, lambda: self.progress_var.set("Error"))
-                self.root.after(0, lambda: self.process_btn.config(state='normal'))
+            if not self.vectorizer:
+                self.vectorizer = DocumentVectorizer(
+                    self.folder_path.get(),
+                    db_path=self.db_path.get(),
+                    collection_name=self.collection_name.get(),
+                    chunk_size=self.chunk_size.get(),
+                    chunk_overlap=self.chunk_overlap.get()
+                )
+            else:
+                self.vectorizer.folder_path = Path(self.folder_path.get())
+            self.vectorizer.process_documents(callback=self.log_message)
+            # Remove the database reload since it's no longer needed
+            self.root.after(0, lambda: self.progress_var.set("Ready"))
+            self.root.after(0, lambda: self.process_btn.config(state='normal'))
+
 
         threading.Thread(target=process, daemon=True).start()
     def save_results(self):
@@ -403,6 +438,77 @@ class DocumentVectorizerGUI:
             self.display_results(results, self.output_format.get())
         except Exception as e:
             self.log_message(f"Search error: {str(e)}")
+
+    def create_new_database(self):
+        try:
+            db_path = self.db_path.get()
+            collection_name = self.collection_name.get()
+            
+            # Ask for confirmation if the directory already exists
+            if os.path.exists(db_path) and os.listdir(db_path):
+                if not tk.messagebox.askyesno("Confirm", 
+                    f"The directory '{db_path}' already exists and contains files. " 
+                    f"Creating a new database might overwrite existing data. Continue?"):
+                    return
+            
+            # Ensure directory exists
+            os.makedirs(db_path, exist_ok=True)
+            
+            # Create a new database
+            self.vectorizer = DocumentVectorizer(
+                folder_path="",
+                db_path=db_path,
+                collection_name=collection_name,
+                chunk_size=self.chunk_size.get(),
+                chunk_overlap=self.chunk_overlap.get()
+            )
+            
+            # Update this to handle the new API
+            collection_names = self.vectorizer.chroma_client.list_collections()
+            self.collections_dropdown['values'] = collection_names
+            if collection_names:
+                self.collections_dropdown.set(collection_names[0])
+                self.collection_name.set(collection_names[0])
+            
+            self.log_message(f"Created new database at {db_path} with collection '{collection_name}'")
+        except Exception as e:
+            self.log_message(f"Error creating database: {str(e)}")
+
+    def create_new_collection(self):
+        if not self.vectorizer:
+            self.log_message("Please load or create a database first")
+            return
+            
+        new_name = tk.simpledialog.askstring("New Collection", "Enter collection name:")
+        if not new_name:
+            return
+            
+        try:
+            # Update this to handle the new API
+            collection_names = self.vectorizer.chroma_client.list_collections()
+            
+            if new_name in collection_names:
+                tk.messagebox.showwarning("Warning", f"Collection '{new_name}' already exists.")
+                return
+                
+            # Create new collection
+            self.vectorizer.chroma_client.create_collection(
+                name=new_name,
+                metadata={"hnsw:space": "cosine"}
+            )
+            
+            # Update vectorizer to use the new collection
+            self.vectorizer.set_collection(new_name)
+            self.collection_name.set(new_name)
+            
+            # Update dropdown with new list
+            collection_names = self.vectorizer.chroma_client.list_collections()
+            self.collections_dropdown['values'] = collection_names
+            self.collections_dropdown.set(new_name)
+            
+            self.log_message(f"Created new collection: {new_name}")
+        except Exception as e:
+            self.log_message(f"Error creating collection: {str(e)}")
 
 class DocumentVectorizer:
     def __init__(self, folder_path: str, db_path: str = "./chroma_db",

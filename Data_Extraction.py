@@ -85,41 +85,57 @@ class DatasheetExtractor:
         self.create_top_menu()
 
     def create_widgets(self):
-        # File path entry
-        tk.Label(self.root, text="File Path").grid(row=0)
-        self.file_path_entry = tk.Entry(self.root)
-        self.file_path_entry.grid(row=0, column=1)
+        # Create main frame to hold all content
+        main_frame = tk.Frame(self.root, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        browse_button = tk.Button(self.root, text="Browse", command=self.browse_file_path)
-        browse_button.grid(row=0, column=2)
+        # File path row frame
+        file_frame = tk.Frame(main_frame)
+        file_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Label(file_frame, text="File Path").pack(side=tk.LEFT, padx=(0, 5))
+        self.file_path_entry = tk.Entry(file_frame)
+        self.file_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        browse_button = tk.Button(file_frame, text="Browse", command=self.browse_file_path)
+        browse_button.pack(side=tk.LEFT)
 
-        # Init Tag Coord entry
-        tk.Label(self.root, text="Init Tag Coord").grid(row=1)
-        self.init_tag_coord_entry = tk.Entry(self.root)
-        self.init_tag_coord_entry.grid(row=1, column=1)
+        # Init Tag Coord row frame
+        tag_frame = tk.Frame(main_frame)
+        tag_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Label(tag_frame, text="Init Tag Coord").pack(side=tk.LEFT, padx=(0, 5))
+        self.init_tag_coord_entry = tk.Entry(tag_frame)
+        self.init_tag_coord_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # Init Coords to Fields row frame
+        coords_frame = tk.Frame(main_frame)
+        coords_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Label(coords_frame, text="Init Coords to Fields").pack(side=tk.LEFT, padx=(0, 5))
+        self.init_coords_to_fields_entry = tk.Entry(coords_frame)
+        self.init_coords_to_fields_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        set_coords_button = tk.Button(coords_frame, text="Set Coordinate Fields", command=self.generate_coords_to_fields)
+        set_coords_button.pack(side=tk.LEFT)
 
+        # Tags per Sheet row frame
+        tags_frame = tk.Frame(main_frame)
+        tags_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Label(tags_frame, text="Tags per Sheet").pack(side=tk.LEFT, padx=(0, 5))
+        self.tags_per_sheet_entry = tk.Entry(tags_frame)
+        self.tags_per_sheet_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Init Coords to Fields entry
-        tk.Label(self.root, text="Init Coords to Fields").grid(row=2)
-        self.init_coords_to_fields_entry = tk.Entry(self.root)
-        self.init_coords_to_fields_entry.grid(row=2, column=1)
-
-        set_coords_button = tk.Button(self.root, text="Set Coordinate Fields", command=self.generate_coords_to_fields)
-        set_coords_button.grid(row=2, column=2)
-
-        # Tags per Sheet entry
-        tk.Label(self.root, text="Tags per Sheet").grid(row=3)
-        self.tags_per_sheet_entry = tk.Entry(self.root)
-        self.tags_per_sheet_entry.grid(row=3, column=1)
-
+        # Buttons frame
+        buttons_frame = tk.Frame(main_frame)
+        buttons_frame.pack(fill=tk.X, pady=(10, 5))
+        
         # Start extraction button
-        start_button = tk.Button(self.root, text="Start Extraction", command=self.start_extraction)
-        start_button.grid(row=4, columnspan=3)
+        start_button = tk.Button(buttons_frame, text="Start Extraction", command=self.start_extraction)
+        start_button.pack(fill=tk.X, pady=2)
 
         # Clear entries button
-        clear_button = tk.Button(self.root, text="Clear Entries", command=self.clear_entries)
-        clear_button.grid(row=5, columnspan=3)
+        clear_button = tk.Button(buttons_frame, text="Clear Entries", command=self.clear_entries)
+        clear_button.pack(fill=tk.X, pady=2)
 
     def create_top_menu(self):
         menu_bar = tk.Menu(self.root)
@@ -157,7 +173,7 @@ class DatasheetExtractor:
         help_menu.add_command(label="About", command=self.show_help)
 
     def browse_file_path(self):
-        filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
+        filepath = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xlsm")])
         if filepath:
             self.file_path_entry.delete(0, tk.END)
             self.file_path_entry.insert(0, filepath)

@@ -53,6 +53,14 @@ class CoordsToFieldsGenerator:
 
         self.listbox = tk.Listbox(frame2)
         self.listbox.pack(fill=tk.BOTH, expand=True)
+        
+        # Add a frame for the Done button
+        frame3 = tk.Frame(self.coords_window)
+        frame3.pack(fill=tk.X, pady=5)
+        
+        # Add the Done button
+        done_button = tk.Button(frame3, text="Done", command=self.on_closing)
+        done_button.pack(side=tk.RIGHT, padx=5, pady=5)
 
         self.update_listbox()
 

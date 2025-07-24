@@ -1,0 +1,39 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Environments
+venv/
+env/
+ENV/
+
+# IDE files
+.idea/
+.vscode/
+
+# Database files
+*.db
+chroma_db/
+chromadb/
+
+# Temporary and output files
+*.xlsx
+*.xls
+*.csv
+*.log
+*.pickle
+*.pkl
+
+# Specific directories to ignore
+misc files/
+path/
+
+# Specific files to ignore
+test_output.xlsx
+excel_search_session.pickle 

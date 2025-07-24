@@ -1,0 +1,7 @@
+python-docx
+sentence-transformers
+pypdf
+chromadb
+pandas
+openpyxl
+nltk

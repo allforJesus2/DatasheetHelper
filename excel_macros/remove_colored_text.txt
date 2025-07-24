@@ -1,0 +1,120 @@
+Sub RemoveColoredTextAndNewlines()
+        ' Declare variables
+        Dim cell As Range
+        Dim originalText As String
+        Dim newText As String
+        Dim i As Long
+        Dim charColor As Long
+        Dim redValue As Long
+        Dim greenValue As Long
+        Dim blueValue As Long
+        Dim colorToRemove As String
+        Dim removeRed As Boolean
+        Dim removeGreen As Boolean
+        Dim removeBlue As Boolean
+        Dim prompt As String
+        Dim title As String
+
+        ' --- User Input ---
+        prompt = "Enter the color component to remove (Red, Green, or Blue):"
+        title = "Select Color to Remove"
+
+        Do
+            colorToRemove = InputBox(prompt, title, "Green") ' Default to Green
+
+            ' Exit if user cancels
+            If StrPtr(colorToRemove) = 0 Then
+                MsgBox "Operation cancelled by user.", vbInformation
+                Exit Sub
+            End If
+
+            ' Validate input
+            Select Case LCase(Trim(colorToRemove))
+                Case "red"
+                    removeRed = True
+                    Exit Do
+                Case "green"
+                    removeGreen = True
+                    Exit Do
+                Case "blue"
+                    removeBlue = True
+                    Exit Do
+                Case Else
+                    MsgBox "Invalid input. Please enter 'Red', 'Green', or 'Blue'.", vbExclamation
+                    ' Loop continues
+            End Select
+        Loop
+
+        ' --- Process Selection ---
+        ' Check if the selection is a valid range
+        If TypeName(Selection) <> "Range" Then
+            MsgBox "Please select a range of cells first.", vbExclamation
+            Exit Sub
+        End If
+
+        Application.ScreenUpdating = False ' Turn off screen updating for speed
+
+        ' Loop through each cell in the user's selection
+        For Each cell In Selection
+            ' Check if the cell contains text
+            If Not IsEmpty(cell) And VarType(cell.Value) = vbString Then
+                originalText = CStr(cell.Value)
+                newText = "" ' Reset newText for each cell
+
+                ' Check if the cell has any rich text formatting
+                If cell.HasFormula Or Not cell.Characters(1, 1).Font Is Nothing Then
+                    On Error Resume Next ' Ignore errors if Characters property fails (e.g., merged cells, protected sheets)
+                    
+                    ' Iterate through each character in the cell
+                    For i = 1 To Len(originalText)
+                        ' Get the color of the current character
+                        charColor = cell.Characters(i, 1).Font.Color
+
+                        ' Extract RGB values from the decimal color code
+                        redValue = charColor Mod 256
+                        greenValue = (charColor \ 256) Mod 256
+                        blueValue = (charColor \ 65536) Mod 256 ' Corrected division for Blue
+
+                        ' Determine if the character should be kept
+                        Dim keepCharacter As Boolean
+                        keepCharacter = True ' Assume we keep the character by default
+
+                        If removeRed And (redValue > greenValue And redValue > blueValue) Then
+                            keepCharacter = False ' Don't keep if Red is prominent and we're removing Red
+                        ElseIf removeGreen And (greenValue > redValue And greenValue > blueValue) Then
+                            keepCharacter = False ' Don't keep if Green is prominent and we're removing Green
+                        ElseIf removeBlue And (blueValue > redValue And blueValue > greenValue) Then
+                            keepCharacter = False ' Don't keep if Blue is prominent and we're removing Blue
+                        End If
+
+                        ' Append the character to newText if it should be kept
+                        If keepCharacter Then
+                            newText = newText & Mid(originalText, i, 1)
+                        End If
+                    Next i
+                    
+                    On Error GoTo 0 ' Turn error handling back on
+                    
+                Else
+                    ' If cell has no rich text formatting, just keep the original text for cleanup
+                    newText = originalText
+                End If
+
+
+                ' --- Cleanup and Final Formatting ---
+                ' Remove newline characters (vbLf = Line Feed, vbCr = Carriage Return)
+                newText = Replace(newText, vbLf, " ") ' Replace Line Feed with space
+                newText = Replace(newText, vbCr, " ") ' Replace Carriage Return with space (handles different newline types)
+
+                ' Use Trim function to remove leading/trailing spaces and reduce multiple spaces between words to one
+                cell.Value = Application.WorksheetFunction.Trim(newText)
+
+                ' Set the font color of the entire cell to black
+                cell.Font.Color = RGB(0, 0, 0)
+            End If
+        Next cell
+
+        Application.ScreenUpdating = True ' Turn screen updating back on
+        MsgBox "Processing complete.", vbInformation
+
+End Sub

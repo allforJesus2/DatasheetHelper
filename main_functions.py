@@ -1,9 +1,9 @@
 import openpyxl
 import xlwings as xw
 import json
-from tkinter import messagebox
+from tkinter import messagebox, Toplevel, Listbox, Button, Frame, MULTIPLE, Checkbutton, IntVar, Label, Scrollbar, Canvas, Entry, Spinbox, END, BOTH, LEFT, RIGHT, TOP, BOTTOM, X, Y, W, E, NW, SE, EW
 from math import log10, floor
-
+import tkinter as tk
 
 # Standalone Functions
 
@@ -30,8 +30,6 @@ def try_round_to_sigfigs(num, sig_figs=4, tolerance=1e-2):
     if num == 0:
         return 0
 
-
-
     # Get the order of magnitude
     magnitude = floor(log10(abs(num)))
 
@@ -51,6 +49,7 @@ def translate(input_string, transformation_code):
     try:
         x_fn = eval(f'lambda x: {transformation_code}')
         transformed_string = x_fn(input_string)
+        print(f'doing transformation {transformation_code} on {input_string} -> {transformed_string}')
         return transformed_string
     except Exception as e:
         print(f'error applying transformation: {e}')
@@ -60,34 +59,36 @@ def translate(input_string, transformation_code):
 # region Excel Cell Operations
 
 def find_cells(sheet, search_terms):
+    """
+    Find rows containing all specified search terms and return the header cells.
+    Returns cells found and a dict of primary cells to their related adjacent cells.
+    """
     cells = []
-    concat_pairs = {}
     concat_cells = {}
 
-    # Parse concat pairs from search terms
-    for term in search_terms:
-        if '+' in term:
-            first, second = term.split('+')
-            concat_pairs[first.lower()] = second.lower()
-
-    # Find cells and track concat pairs separately
-    for row in sheet.iter_rows():
+    # Scan each row to find one containing all search terms
+    for row_idx, row in enumerate(sheet.iter_rows(), 1):
+        found_terms = {}
+        
         for cell in row:
-            if not cell.value:
-                continue
-            cell_value = str(cell.value).lower()
-
-            if cell_value in [term.lower() for term in search_terms if '+' not in term]:
-                cells.append(cell)
-
-            if cell_value in concat_pairs:
-                second_value = concat_pairs[cell_value]
-                for second_cell in row:
-                    if second_cell.value and str(second_cell.value).lower() == second_value:
-                        concat_cells[cell] = second_cell
-                        cells.append(cell)
-                        break
-
+            if cell.value and isinstance(cell.value, str):
+                cell_value = cell.value.lower()
+                # Check if this cell contains any search term
+                for term in search_terms:
+                    if term.lower() == cell_value:
+                        found_terms[term.lower()] = cell
+        
+        # If we found all search terms in this row
+        if len(found_terms) == len(search_terms):
+            # Add the first term's cell as the primary cell
+            primary_cell = found_terms[search_terms[0].lower()]
+            cells.append(primary_cell)
+            
+            # Store relationships to other header cells
+            related_cells = [found_terms[term.lower()] for term in search_terms[1:]]
+            if related_cells:
+                concat_cells[primary_cell] = related_cells
+                
     return cells, concat_cells
 
 def find_cells_old(sheet, search_terms):
@@ -143,9 +144,12 @@ def table_to_list(sheet, start_row, start_col, end_row, end_col, column_headers=
         header_counts[header] = header_counts.get(header, 0) + 1
 
     for i, header in enumerate(headers):
-        if header_counts[header] > 1:
+        print('header ',header)
+
+        # Check if header is not None and if it is duplicated
+        if header is not None and header_counts[header] > 1:
             col_index = start_col + i
-            print(sheet.cell(start_row-1, col_index).value)
+            #print(sheet.cell(start_row-1, col_index).value)
             above_value = get_value_above(sheet, start_row, col_index)
             if above_value:
                 modified_headers[i] = f"{above_value}_{header}"
@@ -157,31 +161,38 @@ def table_to_list(sheet, start_row, start_col, end_row, end_col, column_headers=
 
     return table_list
 
-def list_to_tag_dict(table_list, tag):
+def list_to_tag_dict(table_list, headers, delimiter="-"):
+    """
+    Convert a list of dictionaries to a dictionary keyed by concatenated header values.
+    
+    Args:
+        table_list: List of dictionaries containing row data
+        headers: List of header names to use for key generation
+        delimiter: String to use between concatenated values (default="-")
+        
+    Returns:
+        Dictionary with concatenated keys from header values
+    """
     tag_dict = {}
-    duplicate_counts = {}  # Track how many times we've seen each tag key
-
+    duplicate_counts = {}
+    
     for row in table_list:
-        if '+' in tag:
-            first_tag, second_tag = tag.split('+')
-            if first_tag in row and second_tag in row:
-                base_tag_key = str(row[first_tag]) + str(row[second_tag])
-        else:
-            if tag in row:
-                base_tag_key = row[tag]
-
-        if base_tag_key in tag_dict:
-            # If we've seen this tag before, get the next available number
-            if base_tag_key not in duplicate_counts:
-                duplicate_counts[base_tag_key] = 1
-
-            duplicate_counts[base_tag_key] += 1
-            tag_key = f"{base_tag_key}_{duplicate_counts[base_tag_key]}"
-        else:
-            tag_key = base_tag_key
-
-        tag_dict[tag_key] = row
-
+        # Check if all headers exist in the row
+        if all(header in row for header in headers):
+            # Concatenate the values for all headers with the delimiter
+            key_parts = [str(row[header] or '') for header in headers]
+            base_tag_key = delimiter.join(key_parts)
+            
+            if base_tag_key in tag_dict:
+                if base_tag_key not in duplicate_counts:
+                    duplicate_counts[base_tag_key] = 1
+                duplicate_counts[base_tag_key] += 1
+                tag_key = f"{base_tag_key}_{duplicate_counts[base_tag_key]}"
+            else:
+                tag_key = base_tag_key
+                
+            tag_dict[tag_key] = row
+    
     return tag_dict
 
 def get_table_length_rows(sheet, header_cell):
@@ -205,43 +216,148 @@ def get_table_length_rows(sheet, header_cell):
 
     return table_length
 
-def get_table_cols(sheet, header_cell):
+def get_table_cols(sheet, header_cell, max_empty_allowed=2):
+    """Find the column span of a header row, tolerating blank/merged cells.
+    
+    Args:
+        sheet: The openpyxl worksheet object.
+        header_cell: The openpyxl cell object representing one cell in the header row.
+        max_empty_allowed: The maximum number of consecutive empty/None cells to tolerate
+                           before considering it the end of the table header row.
+                           Defaults to 2.
+    Returns:
+        Tuple[int, int]: The start column index and end column index (1-based).
+    """
     start_col = header_cell.column
-    end_value = header_cell.value
+    end_value = header_cell.value # This might be used as an explicit delimiter
     row = header_cell.row
+    # max_empty_allowed = 2 # Now passed as an argument
 
-    # Find the leftmost column
+    # --- Find the leftmost column ---
     left_col = start_col
-    for col in range(start_col - 1, 0, -1):
-        if sheet.cell(row=row, column=col).value is None:
-            break
-        left_col = col
+    first_content_col = start_col
+    empty_streak_left = 0
 
-    # Find the rightmost column
-    right_col = start_col
-    for col in range(start_col + 1, sheet.max_column + 1):
+    # Scan left from start_col - 1 down to 1
+    for col in range(start_col - 1, 0, -1):
         cell_value = sheet.cell(row=row, column=col).value
-        if cell_value is None or cell_value == end_value:
-            right_col = col - 1
-            break
-        right_col = col
+        is_merged = False
+        effective_value = cell_value # Value to check for content
+
+        # Check if the cell is part of a merged range
+        for range_string in sheet.merged_cells.ranges:
+            min_col_m, min_row_m, max_col_m, max_row_m = range_string.bounds
+            if min_row_m <= row <= max_row_m and min_col_m <= col <= max_col_m:
+                is_merged = True
+                # Use the value from the top-left cell of the merged range
+                effective_value = sheet.cell(row=min_row_m, column=min_col_m).value
+                # If this merged cell has content, update the first known content column
+                if effective_value is not None:
+                    first_content_col = min(first_content_col, min_col_m)
+                break # Found the merge range
+
+        # Determine if the column effectively has content
+        has_content = (effective_value is not None)
+
+        # Update based on content
+        if has_content:
+            # If merged, first_content_col was already updated. If not merged, update here.
+            if not is_merged:
+                 first_content_col = col
+            empty_streak_left = 0 # Reset streak
+        else: # Cell is effectively empty
+            empty_streak_left += 1
+            if empty_streak_left >= max_empty_allowed:
+                # Found the left boundary after a streak of empty cells
+                left_col = first_content_col
+                break # Exit loop
+
+    # If loop finished without break (reached column 1)
+    else:
+        left_col = first_content_col
+
+
+    # --- Find the rightmost column ---
+    right_col = start_col
+    last_content_col = start_col
+    empty_streak_right = 0
+
+    # Scan right from start_col + 1 up to max_column + 1 (to handle edge cases)
+    for col in range(start_col + 1, sheet.max_column + 2):
+        cell_value = None
+        is_merged = False
+        effective_value = None
+
+        if col <= sheet.max_column:
+            cell_value = sheet.cell(row=row, column=col).value
+            effective_value = cell_value
+            # Check if the cell is part of a merged range
+            for range_string in sheet.merged_cells.ranges:
+                min_col_m, min_row_m, max_col_m, max_row_m = range_string.bounds
+                if min_row_m <= row <= max_row_m and min_col_m <= col <= max_col_m:
+                    is_merged = True
+                    effective_value = sheet.cell(row=min_row_m, column=min_col_m).value
+                    # If this merged cell has content, update the last known content column to its right boundary
+                    if effective_value is not None:
+                        last_content_col = max(last_content_col, max_col_m)
+                    break # Found the merge range
+        else:
+            # Treat columns beyond max_column as empty
+            effective_value = None
+
+
+        # Check for explicit end_value delimiter *before* checking for None
+        # Use direct cell_value here, not effective_value, as end_value shouldn't trigger on merged cells unless it's the top-left
+        if cell_value == end_value:
+             right_col = last_content_col # Table ends *before* the delimiter
+             break
+
+        # Determine if the column effectively has content
+        has_content = (effective_value is not None)
+
+        # Update based on content
+        if has_content:
+            # If merged, last_content_col was already updated. If not merged, update here.
+            if not is_merged:
+                 last_content_col = col
+            empty_streak_right = 0 # Reset streak
+        else: # Cell is effectively empty
+            empty_streak_right += 1
+            if empty_streak_right >= max_empty_allowed:
+                # Found the right boundary after a streak of empty cells
+                right_col = last_content_col
+                break # Exit loop
+
+    # If loop finished without break (reached end of sheet)
+    else:
+        right_col = last_content_col
 
     return left_col, right_col
 
-def process_sheet(sheet, headers):
+def process_sheet(sheet, headers, max_empty_allowed=2):
+    """
+    Process a sheet to extract tables based on headers.
+    
+    Args:
+        sheet: Excel worksheet to process
+        headers: List of headers to use for table identification and key generation
+        max_empty_allowed: Max consecutive empty cells allowed in header detection.
+        
+    Returns:
+        List of dictionaries with table data
+    """
     header_cells, concat_pairs = find_cells(sheet, headers)
     tables = []
 
     for cell in header_cells:
         table_length = get_table_length_rows(sheet, cell)
-        left_col, right_col = get_table_cols(sheet, cell)
+        left_col, right_col = get_table_cols(sheet, cell, max_empty_allowed)
 
-        table_dict_list = table_to_list(sheet, cell.row, left_col, cell.row + table_length, right_col)
+        table_dict_list = table_to_list(sheet, cell.row, left_col, 
+                                        cell.row + table_length, right_col)
 
-        original_header = next(h for h in headers if h.lower() == cell.value.lower() or
-                               ('+' in h and h.split('+')[0].lower() == cell.value.lower()))
-
-        tag_dict = list_to_tag_dict(table_dict_list, original_header)
+        # Use all headers for tag dictionary generation
+        tag_dict = list_to_tag_dict(table_dict_list, headers)
         tables.append(tag_dict)
 
     return tables
@@ -281,125 +397,333 @@ def get_unique_sheet_name(datasheet, ds_prefix, sheet_number):
 
     return name
 
-def add_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
-                   rows_per_sheet=1, custom_sort=None, key_coordinate='I12'):
+def update_cell_xlwings(sheet, cell_address, value):
+    """Update cell using xlwings with similar functionality.
+    This function works with merged cells too. Skips update if values are identical."""
+    
+    try:
+        
+        # Convert value to string for comparison if it's not None
+        value_str = str(value).strip() if value is not None else None
+        
+        # Get the cell
+        cell = sheet.range(cell_address)
+        
+        # Check if cell is part of a merged range
+        if cell.api.MergeCells:
+            # Get the merged range address
+            merged_range_address = cell.api.MergeArea.Address
+            # Use the top-left cell of the merged range
+            cell = sheet.range(merged_range_address.split(':')[0])
+        
+        # Process cell update with colors
+        current_value = cell.value if cell.value is not None else ""
+        
+        # Convert current_value to string for comparison if it's not None
+        current_value_str = str(current_value).strip()
+        
+        # Skip update if values are identical
+        if current_value_str == value_str:
+            print(f"Skipping update for {cell_address}: values are identical or there is no source value ({value_str})")
+            return True
+        
+        if current_value != "":
+            current_value_str = str(current_value).strip()
+            
+            if value is not None:
+                cell_values = current_value_str.split('\n')
+                end = len(cell_values) - 1
+                
+                if end >= 0 and cell_values[end] != value_str:
+                    # Format differently using xlwings
+                    new_value = f"{current_value_str}\n{value_str}"
+                    cell.value = new_value
+                    
+                    # Apply formatting (green for old, red for new)
+                    try:
+                        last_line_pos = len(current_value_str)
+                        # Ensure the cell has content before trying to format characters
+                        if cell.value and len(str(cell.value)) > 0:
+                            # Use Font.ColorIndex as a safer alternative
+                            cell.characters[:last_line_pos].font.color = (0, 170, 0)  # Green (RGB)
+                            cell.characters[last_line_pos:].font.color = (255, 0, 0)  # Red (RGB)
+                    except Exception as e:
+                        print(f"Warning: Could not format text colors: {e}")
+                        # Fallback: try to set the entire cell to red if formatting fails
+                        try:
+                            cell.api.Font.Color = (255, 0, 0)  # Red (RGB)
+                        except Exception as fallback_e:
+                            print(f"Warning: Could not apply fallback color formatting: {fallback_e}")
+                    
+        else:
+            if value is not None:
+                cell.value = value
+                try:
+                    # Ensure the cell has content before trying to format characters
+                    if cell.value and len(str(cell.value)) > 0:
+                        # Use xlwings characters property with RGB colors
+                        cell.characters[:].font.color = (255, 0, 0)  # Red (RGB)
+                    else:
+                        # Fallback: set the entire cell font color to red
+                        cell.api.Font.Color = (255, 0, 0)  # Red (RGB)
+                except Exception as e:
+                    print(f"Warning: Could not format text color: {e}")
+                    # Final fallback: try to set the entire cell to red
+                    try:
+                        cell.api.Font.Color = (255, 0, 0)  # Red (RGB)
+                    except Exception as fallback_e:
+                        print(f"Warning: Could not apply fallback color formatting: {fallback_e}")
+                
+                
+        return True
+    except Exception as e:
+        print(f'Error updating cell {cell_address}: {e}')
+        return False
+
+
+
+def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
+                   rows_per_sheet=1, custom_sort=None, key_coordinate='I12',
+                   sig_figs=4, tolerance=1e-2):
     """
     Manages Excel sheets by adding or updating data based on tags.
-
-    Args:
-        datasheet: Excel workbook object
-        source_sheet_name: Name of template sheet to copy from
-        tag_cell_values: Dict of tags mapping to cell value updates {tag: {cell_ref: value}}
-        datasheet_coord: Cell reference where sheet name should be written
-        ds_prefix: Prefix for new sheet names
-        rows_per_sheet: Number of data rows per sheet (default=1)
-        custom_sort: Optional function for custom tag sorting
-        key_coordinate: Starting cell reference for tag placement (default='I12')
+    
+    Updates existing tags first, then creates new sheets for additional tags if a source sheet is provided.
     """
-    source_sheet = datasheet.sheets[source_sheet_name]
-    added_sheets = set()  # Track sheets we modify
-
-    # Build dictionary of existing tags and their locations in workbook
+    # Determine if we can create new sheets
+    can_create_new_sheets = False
+    if source_sheet_name:
+        try:
+            source_sheet = datasheet.sheets[source_sheet_name]
+            can_create_new_sheets = True
+        except Exception as e:
+            print(f"Error accessing source sheet: {e}")
+            source_sheet = None
+    
+    # Find all existing tags
     existing_tags = {}
     for sheet in datasheet.sheets:
-
-        # Skip the source/template sheet even if it matches the prefix
         if sheet.name == source_sheet_name:
             continue
-
-        if sheet.name.startswith(ds_prefix) or ds_prefix == '':
+            
+        if sheet.name.startswith(ds_prefix) or ds_prefix == '' :
+            print(f"Processing sheet {sheet.name} since it starts with {ds_prefix}")
             for i in range(rows_per_sheet):
                 offset_coord = increment_cell_reference(key_coordinate, i)
                 tag_value = sheet.range(offset_coord).value
                 if tag_value:
                     existing_tags[tag_value] = (sheet.name, offset_coord)
-
-
+    
     print(f'Existing tags: {existing_tags}')
-
+    
     # Sort tags according to custom function or default alphabetical
-    sorted_keys = sorted(tag_cell_values, key=custom_sort) if custom_sort else sorted(tag_cell_values)
-    print(f'Tags to process: {sorted_keys}')
-
-    # Process each tag - either update existing or create new entry
-    count = len(existing_tags)
+    sorted_keys = sorted(tag_cell_values, key=custom_sort) if custom_sort else tag_cell_values
+    
+    added_sheets = set()
+    # Process existing tags first
     for tag in sorted_keys:
         if tag in existing_tags:
             # Update values for existing tag
             print(f'Updating existing tag {tag}')
             sheet_name, tag_coord = existing_tags[tag]
             target_sheet = datasheet.sheets[sheet_name]
-        else:
-            # Create new sheet if needed based on rows_per_sheet
+            
+            # Update cells for this tag
+            cell_values = tag_cell_values[tag]
+            try:
+                row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
+            except (ValueError, IndexError) as e:
+                print(f"Error calculating row offset for existing tag {tag}: {e}")
+                print(f"tag_coord: '{tag_coord}', key_coordinate: '{key_coordinate}'")
+                row_offset = 0  # Default to 0 if we can't calculate the offset
+            
+            for cell, value in cell_values.items():
+                try:
+                    target_cell = increment_cell_reference(cell, row_offset)
+                    value = try_round_to_sigfigs(value, sig_figs, tolerance)
+                    update_cell_xlwings(target_sheet, target_cell, value)
+                except Exception as e:
+                    print(f"Error updating cell {cell} for tag {tag}: {e}")
+    
+    # Create new sheets for remaining tags if we have a source sheet
+    if can_create_new_sheets:
+        count = len(existing_tags)
+        print(f"existing tags length: {len(existing_tags)}")
+        remaining_tags = [tag for tag in sorted_keys if tag not in existing_tags]
+        print(f"remaining tags length: {len(remaining_tags)}")
+
+        for tag in remaining_tags:
             print(f'Adding new tag {tag}')
+            datasheet_no = get_unique_sheet_name(datasheet, ds_prefix, (count // rows_per_sheet) + 1)
+            print(f'Datasheet number: {datasheet_no}, count: {count}, rows per sheet: {rows_per_sheet}')
+            if rows_per_sheet == 1:
+                sheet_name = tag
+            else:
+                sheet_name = datasheet_no
+                
             if count % rows_per_sheet == 0:
-                sheet_name = get_unique_sheet_name(datasheet, ds_prefix, (count // rows_per_sheet) + 1)
                 try:
                     datasheet.sheets[sheet_name].delete()  # Remove if exists
                 except:
                     pass
                 target_sheet = source_sheet.copy(name=sheet_name)
-                added_sheets.add(sheet_name)  # Track new sheets
-                target_sheet.range(datasheet_coord).value = sheet_name
+                added_sheets.add(sheet_name)
+                update_cell_xlwings(target_sheet, datasheet_coord, datasheet_no)
             else:
-                sheet_name = get_unique_sheet_name(datasheet, ds_prefix, (count // rows_per_sheet) + 1)
-                print('Might need to make sure existing sheet names dont cause issues')
                 target_sheet = datasheet.sheets[sheet_name]
-
+                
             tag_coord = increment_cell_reference(key_coordinate, count % rows_per_sheet)
-            count += 1
-
-        # Update all specified cells for this tag
-        cell_values = tag_cell_values[tag]
-        row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
-
-        for cell, value in cell_values.items():
+            update_cell_xlwings(target_sheet, tag_coord, tag)
+            
+            # Update cells for this tag
+            cell_values = tag_cell_values[tag]
             try:
-                target_cell = increment_cell_reference(cell, row_offset)
-                value = try_round_to_sigfigs(value)
-                target_sheet.range(target_cell).value = value
-            except Exception as e:
-                print(f"Error updating cell {cell} for tag {tag}: {e}")
+                row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
+            except (ValueError, IndexError) as e:
+                print(f"Error calculating row offset for tag {tag}: {e}")
+                print(f"tag_coord: '{tag_coord}', key_coordinate: '{key_coordinate}'")
+                row_offset = 0  # Default to 0 if we can't calculate the offset
+            
+            for cell, value in cell_values.items():
+                try:
+                    target_cell = increment_cell_reference(cell, row_offset)
+                    value = try_round_to_sigfigs(value, sig_figs, tolerance)
+                    update_cell_xlwings(target_sheet, target_cell, value)
+                except Exception as e:
+                    print(f"Error updating cell {cell} for tag {tag}: {e}")
+                    
+            count += 1
+    
+    return list(added_sheets)
 
-    return list(added_sheets)  # Return list of all sheets we Added
-
-def update_datasheets(datasheet_path, tag_cell_values, ds_prefix, rows_per_sheet=1, key_coordinate='I12'):
-
-    datasheet = xw.Book(datasheet_path)
-
-    # Get existing tags and their locations
-    # here were baiscally machine-gunning the datasheet with data
-    for sheet in datasheet.sheets:
-        if sheet.name.startswith(ds_prefix) or ds_prefix == '':
-            for i in range(rows_per_sheet):
-                tag_coord = increment_cell_reference(key_coordinate, i)
-                tag_value = sheet.range(tag_coord).value
-                if tag_value in tag_cell_values:# and re.search(tag_pattern, str(tag_value)):
-                    coord_values = tag_cell_values[tag_value]
-                    # so coord values is going to be like:
-                    #{'C38': 'LE-3101', 'E38': 'AT1-2000-PR-PID-111', 'F38': 'TK-3101A', 'H38': 'SOFTENING FEED TANK A'}
-                    for coord, value in coord_values.items():
-                        current_coord = increment_cell_reference(coord,i)
-                        sheet.range(current_coord).value = value
 # endregion
 
 # region Dictionary and JSON Operations
 
-def generate_dictionary_from_xlsx(wb_path, headers):
+def select_sheets_dialog(parent, sheet_names, title="Select Sheets to Process"):
+    """
+    Display a dialog for selecting sheets to process.
+    
+    Args:
+        parent: Parent tkinter window
+        sheet_names: List of sheet names to choose from
+        title: Dialog title
+        
+    Returns:
+        List of selected sheet names
+    """
+    dialog = Toplevel(parent)
+    dialog.title(title)
+    dialog.geometry("400x400")
+    dialog.transient(parent)
+    dialog.grab_set()
+    
+    Label(dialog, text="Select sheets to process:").pack(pady=5)
+    
+    # Create a frame for the listbox and scrollbar
+    list_frame = Frame(dialog)
+    list_frame.pack(fill="both", expand=True, padx=10, pady=5)
+    
+    # Add a canvas with scrollbar
+    canvas = tk.Canvas(list_frame)
+    scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+    scrollable_frame = Frame(canvas)
+    
+    scrollable_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+    
+    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+    
+    # Pack the scrollbar and canvas
+    scrollbar.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    
+    # Create checkbuttons for each sheet
+    check_vars = {}
+    for sheet in sheet_names:
+        var = IntVar(value=0)
+        check_vars[sheet] = var
+        Checkbutton(scrollable_frame, text=sheet, variable=var).pack(anchor="w", fill="x")
+    
+    # Buttons frame
+    button_frame = Frame(dialog)
+    button_frame.pack(fill="x", padx=10, pady=10, side="bottom")
+    
+    selected_sheets = []
+    
+    def on_select_all():
+        for var in check_vars.values():
+            var.set(1)
+    
+    def on_select_none():
+        for var in check_vars.values():
+            var.set(0)
+    
+    def on_ok():
+        nonlocal selected_sheets
+        selected_sheets = [sheet for sheet, var in check_vars.items() if var.get() == 1]
+        dialog.destroy()
+    
+    def on_cancel():
+        dialog.destroy()
+    
+    Button(button_frame, text="Select All", command=on_select_all).pack(side="left", padx=5)
+    Button(button_frame, text="Select None", command=on_select_none).pack(side="left", padx=5)
+    Button(button_frame, text="OK", command=on_ok).pack(side="right", padx=5)
+    Button(button_frame, text="Cancel", command=on_cancel).pack(side="right", padx=5)
+    
+    # Wait for the dialog to be closed
+    parent.wait_window(dialog)
+    
+    return selected_sheets
+
+def generate_dictionary_from_xlsx(wb_path, headers, parent=None, selected_sheets=None, max_empty_allowed=2):
+    """
+    Generate a dictionary from Excel file where keys are concatenated values 
+    from multiple headers.
+    
+    Args:
+        wb_path: Path to Excel workbook
+        headers: List of headers to use for dictionary generation
+        parent: Parent tkinter window for sheet selection dialog
+        selected_sheets: List of sheet names to process (if None, will prompt)
+        max_empty_allowed: Max consecutive empty cells allowed in header detection.
+        
+    Returns:
+        Dictionary with concatenated header values as keys
+    """
     wb = openpyxl.load_workbook(wb_path, read_only=False, data_only=True)
-    # process_conditions['09-PM-006-2'] = ...
     wb_tag_data = {}
-    sheet_names = wb.sheetnames
-
-    for i, sheet in enumerate(wb.worksheets):
-        print(f'processing {sheet_names[i]}')
-
-        tag_tables = process_sheet(sheet, headers)
-
-        sheet_data = combine_tables(tag_tables)
-
-        if sheet_data:
-            wb_tag_data.update(sheet_data)
+    all_sheet_names = wb.sheetnames
+    
+    # If no sheets are pre-selected and we have a parent window, show selection dialog
+    if selected_sheets is None and parent is not None:
+        selected_sheets = select_sheets_dialog(parent, all_sheet_names)
+        
+        # If user cancels or selects no sheets, use all sheets
+        if not selected_sheets:
+            selected_sheets = all_sheet_names
+    elif selected_sheets is None:
+        # If no parent window provided, use all sheets
+        selected_sheets = all_sheet_names
+    
+    # Process only the selected sheets
+    for sheet_name in selected_sheets:
+        if sheet_name in wb:
+            print(f'processing {sheet_name}')
+            sheet = wb[sheet_name]
+            
+            # Pass max_empty_allowed to process_sheet
+            tag_tables = process_sheet(sheet, headers, max_empty_allowed)
+            sheet_data = combine_tables(tag_tables)
+            
+            if sheet_data:
+                wb_tag_data.update(sheet_data)
+        else:
+            print(f'Sheet {sheet_name} not found in workbook')
 
     return wb_tag_data
 
