@@ -69,8 +69,8 @@ class ExcelManager:
             # Force close any existing connections
             self.cleanup()
             
-            # Create new Excel instance
-            self.app = xw.App(visible=True)
+            # Create new Excel instance without a blank workbook
+            self.app = xw.App(visible=True, add_book=False)
             self.app.display_alerts = False
             
             # Open workbook

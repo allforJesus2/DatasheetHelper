@@ -1,21 +1,63 @@
+print("DEBUG: Starting imports...")
+
+print("DEBUG: Importing tkinter...")
 import tkinter as tk
 from tkinter import filedialog
+
+print("DEBUG: Importing main_functions...")
 from main_functions import *
+
+print("DEBUG: Importing tkinter components...")
 from tkinter import scrolledtext, Toplevel, Listbox, Button, Frame, MULTIPLE, Checkbutton, IntVar, Label, Scrollbar, Canvas, Entry, Spinbox, END, BOTH, LEFT, RIGHT, TOP, BOTTOM, X, Y, W, E, NW, SE, EW, messagebox, VERTICAL
 from tkinter import ttk  # Import ttk for Combobox
+
+print("DEBUG: Importing standard libraries...")
 import json
 import re
 import os
+# Set environment variable to handle OpenMP runtime conflict
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
+print("DEBUG: Importing xlwings...")
 import xlwings as xw
+
+print("DEBUG: Importing Data_Extraction...")
 from Data_Extraction import DatasheetExtractor
+
+print("DEBUG: Importing xlsx_search...")
 from xlsx_search import ExcelSearchApp
+
+print("DEBUG: Importing edit_xlsx...")
 from edit_xlsx import ExcelEditorApp
+
+print("DEBUG: Importing pickle...")
 import pickle
+
+print("DEBUG: Importing tkinter.simpledialog...")
 from tkinter.simpledialog import askstring
+
+print("DEBUG: Importing excel_manager...")
 from excel_manager import *
+
+print("DEBUG: Importing openpyxl...")
 import openpyxl
+
+print("DEBUG: Importing excel_macro_viewer...")
 from excel_macro_viewer import ExcelMacroViewer # Add this import
+
+print("DEBUG: Importing excel_regex_search...")
 from excel_regex_search import ExcelRegexSearchApp
+
+print("DEBUG: Importing threading...")
+import threading
+
+print("DEBUG: Importing numpy...")
+import numpy as np
+
+print("DEBUG: Importing sentence_transformers...")
+from sentence_transformers import SentenceTransformer
+
+print("DEBUG: All imports completed successfully!")
 
 
 class CoordinateValue:
@@ -180,26 +222,57 @@ class DatasheetGeneratorApp:
     # region Initialization
 
     def __init__(self, root):
+        print("DEBUG: Starting DatasheetGeneratorApp initialization...")
         self.root = root
+        print("DEBUG: Setting window title...")
         self.root.title("Datasheet Helper App")
+        print("DEBUG: Creating ExcelManager...")
         self.excel_mgr = ExcelManager()
+        print("DEBUG: Initializing basic attributes...")
         self.new_sheets = []
-        self.td_selected_sheets = None
-        self.pc_selected_sheets = None
+        self.halt_flag = False  # Flag to control halting of add_update_datasheets
+        self.is_processing = False  # Flag to track if datasheet generation is running
+        
+        # Centralized data type definitions
+        print("DEBUG: Setting up data type definitions...")
+        self.data_types = {
+            'td': {
+                'name': 'Tag Dictionary',
+                'short_name': 'TD',
+                'description': 'Tag data from Excel files',
+                'default_headers': ['TAG NUMBER'],
+                'coordinate_values': {},
+                'selected_sheets': None,
+                'path_key': 'tag_data_path'
+            },
+            'pc': {
+                'name': 'Process Conditions', 
+                'short_name': 'PC',
+                'description': 'Process conditions data from Excel files',
+                'default_headers': ['Line No.'],
+                'coordinate_values': {},
+                'selected_sheets': None,
+                'path_key': 'process_conditions_path'
+            }
+        }
+        
+        # Initialize data type attributes
+        print("DEBUG: Initializing data type attributes...")
+        for data_type, config in self.data_types.items():
+            setattr(self, f'{data_type}_selected_sheets', config['selected_sheets'])
+            setattr(self, f'{data_type}_coordinate_values', config['coordinate_values'])
+            setattr(self, data_type, {})
+            setattr(self, f'{data_type}_headers', config['default_headers'])
+        
+        # Initialize parameters dynamically
+        print("DEBUG: Setting up parameters...")
         self.parameters = {
-            'process_conditions_path': '',
-            'tag_data_path': '',
-            'td_coordinate_values': {},
-            'pc_coordinate_values': {},
-            'td': {},
-            'td_headers': ['TAG NUMBER'],
-            'pc': {},
-            'pc_headers': ['Line No.'],
             'transformation_code': 'int(x.split("-")[2])',
-            'td_xkey': '',
+            'current_transform_data_type': None,  # Dynamic transform data type
+            'current_transform_key': '',  # Dynamic transform key
             'tag_filters': [],
             'tag_cell_values': {},
-            'datasheet_path': '',
+            'datasheets': '',
             'source_sheet_name': 'TEMPLATE',
             'datasheet_coord': 'U8',
             'ds_str': 'DS-IA-',
@@ -211,102 +284,319 @@ class DatasheetGeneratorApp:
             'coordinate_conversions': {}, # Stores coordinate-specific unit conversions
             'coordinate_combinations': {} # Stores coordinate combinations (e.g., {'A1': {'combines': ['B1', 'C1'], 'operation': 'add'}})
         }
+        
+        # Add data type paths dynamically
+        print("DEBUG: Adding data type paths...")
+        for data_type, config in self.data_types.items():
+            path_key = config.get('path_key', f'{data_type}_path')
+            self.parameters[path_key] = ''
 
         # Initialize all parameters in the __init__ method
+        print("DEBUG: Setting parameter attributes...")
         for param, value in self.parameters.items():
             setattr(self, param, value)
 
+        # Semantic similarity model
+        print("DEBUG: Initializing semantic model attributes...")
+        self.semantic_model = None
+        self.model_loaded = False
+        self.loading_model = False
+
+        print("DEBUG: About to create widgets...")
         self.create_widgets()
+        print("DEBUG: DatasheetGeneratorApp initialization completed!")
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def get_data_type_config(self, data_type):
+        """Get configuration for a specific data type"""
+        return self.data_types.get(data_type, {})
+    
+    def get_data_type_name(self, data_type):
+        """Get the full name of a data type"""
+        config = self.get_data_type_config(data_type)
+        return config.get('name', data_type.upper())
+    
+    def get_data_type_short_name(self, data_type):
+        """Get the short name of a data type"""
+        config = self.get_data_type_config(data_type)
+        return config.get('short_name', data_type.upper())
+    
+    def get_data_type_headers(self, data_type):
+        """Get the headers for a data type"""
+        return getattr(self, f'{data_type}_headers', [])
+    
+    def set_data_type_headers(self, data_type, headers):
+        """Set the headers for a data type"""
+        setattr(self, f'{data_type}_headers', headers)
+    
+    def get_data_type_data(self, data_type):
+        """Get the data dictionary for a data type"""
+        return getattr(self, data_type, {})
+    
+    def set_data_type_data(self, data_type, data):
+        """Set the data dictionary for a data type"""
+        setattr(self, data_type, data)
+    
+    def get_data_type_coordinate_values(self, data_type):
+        """Get coordinate values for a data type"""
+        return getattr(self, f'{data_type}_coordinate_values', {})
+    
+    def set_data_type_coordinate_values(self, data_type, coordinate_values):
+        """Set coordinate values for a data type"""
+        setattr(self, f'{data_type}_coordinate_values', coordinate_values)
+    
+    def get_data_type_selected_sheets(self, data_type):
+        """Get selected sheets for a data type"""
+        return getattr(self, f'{data_type}_selected_sheets', None)
+    
+    def set_data_type_selected_sheets(self, data_type, selected_sheets):
+        """Set selected sheets for a data type"""
+        setattr(self, f'{data_type}_selected_sheets', selected_sheets)
+    
+    def get_data_type_path(self, data_type):
+        """Get the file path for a data type"""
+        config = self.get_data_type_config(data_type)
+        path_key = config.get('path_key', f'{data_type}_path')
+        return getattr(self, path_key, '')
+    
+    def set_data_type_path(self, data_type, path):
+        """Set the file path for a data type"""
+        config = self.get_data_type_config(data_type)
+        path_key = config.get('path_key', f'{data_type}_path')
+        setattr(self, path_key, path)
+    
+    def get_all_data_types(self):
+        """Get all available data types"""
+        return list(self.data_types.keys())
+    
+    def add_data_type(self, data_type, config):
+        """Add a new data type configuration"""
+        self.data_types[data_type] = config
+        # Initialize attributes for the new data type
+        setattr(self, f'{data_type}_selected_sheets', config.get('selected_sheets', None))
+        setattr(self, f'{data_type}_coordinate_values', config.get('coordinate_values', {}))
+        setattr(self, data_type, {})
+        setattr(self, f'{data_type}_headers', config.get('default_headers', []))
+        
+        # Add the path to parameters if it doesn't exist
+        path_key = config.get('path_key', f'{data_type}_path')
+        if path_key not in self.parameters:
+            self.parameters[path_key] = ''
+            setattr(self, path_key, '')
+        
+        # Refresh the GUI to include the new data type
+        if hasattr(self, 'root') and self.root:
+            self.refresh_data_type_frames()
+            self.refresh_tab_content()
+    
+    def add_example_data_type(self):
+        """Example method showing how to add a new data type"""
+        # Example: Adding a new data type called 'equipment'
+        equipment_config = {
+            'name': 'Equipment Data',
+            'short_name': 'EQ',
+            'description': 'Equipment information from Excel files',
+            'default_headers': ['Equipment ID'],
+            'coordinate_values': {},
+            'selected_sheets': None,
+            'path_key': 'equipment_path'
+        }
+        self.add_data_type('equipment', equipment_config)
+        # Add the path to parameters
+        self.parameters['equipment_path'] = ''
+        setattr(self, 'equipment_path', '')
+        print("Added new data type: Equipment Data (EQ)")
+        print("Available data types:", self.get_all_data_types())
+    
+    def create_data_type_frames(self, parent):
+        """Dynamically create UI frames for all data types"""
+        print("DEBUG: Starting create_data_type_frames...")
+        # Add a label for the data sources section
+        sources_label = tk.Label(parent, text="DATA SOURCES", font=("Arial", 10, "bold"), fg="green")
+        sources_label.pack(anchor=tk.W, padx=5, pady=(5,0))
+        
+        print("DEBUG: Creating frames for each data type...")
+        for data_type in self.get_all_data_types():
+            config = self.get_data_type_config(data_type)
+            name = config.get('name', data_type.upper())
+            path_key = config.get('path_key', f'{data_type}_path')
+            
+            # Create frame for this data type
+            frame = tk.Frame(parent)
+            frame.pack(fill=tk.X, pady=5)
+            
+            # Label
+            label = tk.Label(frame, text=f"{name} (Source)", width=30)
+            label.pack(side=tk.LEFT, padx=5)
+            
+            # Entry
+            entry = tk.Entry(frame)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            self.entries.append((entry, path_key))
+            
+            # Buttons frame
+            buttons = tk.Frame(frame)
+            buttons.pack(side=tk.RIGHT)
+            
+            # Browse button
+            tk.Button(buttons, text="Browse",
+                      command=lambda e=entry, p=path_key: self.browse(e, p)).pack(side=tk.LEFT, padx=2)
+            
+            # Open button
+            tk.Button(buttons, text="Open",
+                      command=lambda e=entry: self.open_file(e)).pack(side=tk.LEFT, padx=2)
+            
+            # Configure button
+            tk.Button(buttons, text="Configure",
+                      command=lambda n=name: self.configure(n)).pack(side=tk.LEFT, padx=2)
+            
+            # Generate button
+            tk.Button(buttons, text="Generate",
+                      command=lambda dt=data_type: self.generate_data_type(dt)).pack(side=tk.LEFT, padx=2)
+            
+            # View button
+            tk.Button(buttons, text="View",
+                      command=lambda n=name: self.view_data(n)).pack(side=tk.LEFT, padx=2)
+            
+            # Store reference to frame for potential updates
+            setattr(self, f'{data_type}_frame', frame)
+        print("DEBUG: create_data_type_frames completed!")
+    
+    def generate_data_type(self, data_type):
+        """Generic method to generate data for any data type"""
+        config = self.get_data_type_config(data_type)
+        name = config.get('name', data_type.upper())
+        
+        # Call the appropriate generation method based on data type
+        if data_type == 'td':
+            self.generate_tag_data()
+        elif data_type == 'pc':
+            self.generate_process_conditions()
+        else:
+            # For new data types, use a generic approach
+            self.generate_generic_data(data_type)
+    
+    def generate_generic_data(self, data_type):
+        """Generate data for any data type using the centralized system"""
+        config = self.get_data_type_config(data_type)
+        name = config.get('name', data_type.upper())
+        path_key = config.get('path_key', f'{data_type}_path')
+        
+        # Get the file path
+        file_path = getattr(self, path_key, '')
+        if not file_path:
+            messagebox.showwarning("Warning", f"No file path set for {name}")
+            return
+        
+        # Get headers and selected sheets
+        headers = self.get_data_type_headers(data_type)
+        selected_sheets = self.get_data_type_selected_sheets(data_type)
+        
+        # Generate data using the same pattern as TD and PC
+        data = generate_dictionary_from_xlsx(file_path, headers,
+                                          parent=self.root, selected_sheets=selected_sheets,
+                                          max_empty_allowed=self.blank_cell_tolerance)
+        
+        if data is not None:
+            self.set_data_type_data(data_type, data)
+            show_nested_dict_analysis(data)
+            print(f"Generated {name}")
+            self.refresh_tab_content()
+        else:
+            print(f"{name} generation cancelled or failed.")
+    
+    def refresh_data_type_frames(self):
+        """Refresh all data type frames when new data types are added"""
+        # Remove existing data type frames
+        for data_type in self.get_all_data_types():
+            frame_name = f'{data_type}_frame'
+            if hasattr(self, frame_name):
+                frame = getattr(self, frame_name)
+                frame.destroy()
+                delattr(self, frame_name)
+        
+        # Recreate frames
+        main_frame = self.root.winfo_children()[0]  # Get the main frame
+        self.create_data_type_frames(main_frame)
 
         #self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
 
     def create_widgets(self):
+        print("DEBUG: Starting create_widgets...")
         # Create menu bar
+        print("DEBUG: Creating menu bar...")
         self.menu_bar = tk.Menu(self.root)
         self.root.config(menu=self.menu_bar)
 
         # Create Commands menu
+        print("DEBUG: Creating Commands menu...")
         self.command_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="Commands", menu=self.command_menu)
 
         # Add menu items
+        print("DEBUG: Setting up menu commands...")
         menu_commands = [
             ("Load Settings", self.load_settings),
-            ("Load Settings except td and pc", self.load_settings_except_td_pc),
             ("Save Settings", self.save_settings),
-            ("Populate Index (td) from Json", self.load_td_from_json),
-            ("Populate Index (td) from Datasheet", self.load_td_from_datasheet),
-            ("Populate Index (pc) from Datasheet", self.load_pc_from_datasheet),
             ("Run xlsx search app", self.open_excel_search_app),
             ("Save and close", self.save_and_close_workbook),
             ("Populate Headers on Datasheets", self.open_edit_xlsx),
             ("View Coordinate Value Data", self.display_coordinate_values),
             ("Delete newly added datasheets", self.delete_added_sheets),
-            ("Modify Keys in PC", self.update_pc_keys),
             ("Rebuild tabs", self.refresh_tab_content),
             ("Delete Certain Sheets by Prefix", self.delete_sheets_by_prefix),
-            ("Excel Macros", self.open_excel_macros_window), # Add new entry
-            ("Excel Regex Search App", self.open_excel_regex_search_app)
+            ("Excel Macros", self.open_excel_macros_window),
+            ("Excel Regex Search App", self.open_excel_regex_search_app),
+            ("Stop Datasheet Generation", self.set_halt_flag)
         ]
+        
+        # Add dynamic menu items for each data type
+        print("DEBUG: Adding dynamic menu items for data types...")
+        for data_type in self.get_all_data_types():
+            config = self.get_data_type_config(data_type)
+            name = config.get('name', data_type.upper())
+            short_name = config.get('short_name', data_type.upper())
+            
+            # Add data type specific menu items
+            menu_commands.extend([
+                (f"Populate {name} from Json", lambda dt=data_type: self.load_data_type_from_json(dt)),
+                (f"Populate {name} from Datasheet", lambda dt=data_type: self.load_data_type_from_datasheet(dt)),
+                (f"Modify Keys in {short_name}", lambda dt=data_type: self.update_data_type_keys(dt))
+            ])
 
+        print("DEBUG: Adding menu commands to menu...")
         for label, command in menu_commands:
             self.command_menu.add_command(label=label, command=command)
 
         # Create main container frame
+        print("DEBUG: Creating main container frame...")
         main_frame = tk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         self.entries = []  # Store entries for later reference
 
-        # Process Conditions Row
-        pc_frame = tk.Frame(main_frame)
-        pc_frame.pack(fill=tk.X, pady=5)
+        # Dynamically create frames for all data types
+        print("DEBUG: Creating data type frames...")
+        self.create_data_type_frames(main_frame)
 
-        pc_label = tk.Label(pc_frame, text="Process Conditions (Source 2)", width=30)
-        pc_label.pack(side=tk.LEFT, padx=5)
+        # Add a visual separator between data sources and destination
+        print("DEBUG: Creating separator and destination container...")
+        separator_frame = tk.Frame(main_frame, height=2, bg='gray')
+        separator_frame.pack(fill=tk.X, pady=10)
+        separator_frame.pack_propagate(False)
 
-        pc_entry = tk.Entry(pc_frame)
-        pc_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.entries.append((pc_entry, "process_conditions_path"))
+        # Create destination container with distinct styling
+        destination_container = tk.Frame(main_frame, relief=tk.RAISED, borderwidth=2)
+        destination_container.pack(fill=tk.X, pady=5, padx=5)
 
-        pc_buttons = tk.Frame(pc_frame)
-        pc_buttons.pack(side=tk.RIGHT)
+        # Destination label to indicate this is the output
+        dest_label = tk.Label(destination_container, text="DESTINATION", font=("Arial", 10, "bold"), fg="blue")
+        dest_label.pack(anchor=tk.W, padx=5, pady=(5,0))
 
-        tk.Button(pc_buttons, text="Browse",
-                  command=lambda: self.browse(pc_entry, "process_conditions_path")).pack(side=tk.LEFT, padx=2)
-        tk.Button(pc_buttons, text="Configure",
-                  command=lambda: self.configure("Process Conditions")).pack(side=tk.LEFT, padx=2)
-        tk.Button(pc_buttons, text="Generate",
-                  command=self.generate_process_conditions).pack(side=tk.LEFT, padx=2)
-        tk.Button(pc_buttons, text="View",
-                  command=lambda: self.view_data("Process Conditions")).pack(side=tk.LEFT, padx=2)
-
-        # Instrument Index Row
-        ii_frame = tk.Frame(main_frame)
-        ii_frame.pack(fill=tk.X, pady=5)
-
-        ii_label = tk.Label(ii_frame, text="Instrument Index (Source 1)", width=30)
-        ii_label.pack(side=tk.LEFT, padx=5)
-
-        ii_entry = tk.Entry(ii_frame)
-        ii_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        self.entries.append((ii_entry, "tag_data_path"))
-
-        ii_buttons = tk.Frame(ii_frame)
-        ii_buttons.pack(side=tk.RIGHT)
-
-        tk.Button(ii_buttons, text="Browse",
-                  command=lambda: self.browse(ii_entry, "tag_data_path")).pack(side=tk.LEFT, padx=2)
-        tk.Button(ii_buttons, text="Configure",
-                  command=lambda: self.configure("Instrument Index")).pack(side=tk.LEFT, padx=2)
-        tk.Button(ii_buttons, text="Generate",
-                  command=self.generate_tag_data).pack(side=tk.LEFT, padx=2)
-        tk.Button(ii_buttons, text="View",
-                  command=lambda: self.view_data("Instrument Index")).pack(side=tk.LEFT, padx=2)
-
-        # Datasheets Row
-        ds_frame = tk.Frame(main_frame)
+        # Datasheets Row (single destination)
+        ds_frame = tk.Frame(destination_container)
         ds_frame.pack(fill=tk.X, pady=5)
 
         ds_label = tk.Label(ds_frame, text="Datasheets (Destination)", width=30)
@@ -323,12 +613,23 @@ class DatasheetGeneratorApp:
                   command=lambda: self.browse(ds_entry, "datasheets")).pack(side=tk.LEFT, padx=2)
         tk.Button(ds_buttons, text="Configure",
                   command=lambda: self.configure("Datasheets")).pack(side=tk.LEFT, padx=2)
-        tk.Button(ds_buttons, text="Generate",
-                  command=self.add_datasheets).pack(side=tk.LEFT, padx=2)
+        self.generate_button = tk.Button(ds_buttons, text="Generate",
+                  command=self.add_datasheets)
+        self.generate_button.pack(side=tk.LEFT, padx=2)
+        
+        self.stop_button = tk.Button(ds_buttons, text="Stop",
+                  command=self.set_halt_flag, bg="red", fg="white", state="disabled")
+        self.stop_button.pack(side=tk.LEFT, padx=2)
+        
         tk.Button(ds_buttons, text="View",
                   command=lambda: self.view_data("Datasheets")).pack(side=tk.LEFT, padx=2)
 
+        # Add status label
+        self.status_label = tk.Label(destination_container, text="Ready", fg="black", font=("Arial", 9))
+        self.status_label.pack(anchor=tk.W, padx=5, pady=(5,0))
+
         # Create notebook after entries
+        print("DEBUG: Creating configuration notebook...")
         self.config_frame = tk.Frame(main_frame)
         self.config_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
@@ -336,27 +637,31 @@ class DatasheetGeneratorApp:
         self.notebook.pack(fill=tk.BOTH, expand=True)
 
         # Create tab pages
+        print("DEBUG: Creating tab pages...")
         coordinates_tab = ttk.Frame(self.notebook)
         datasheet_tab = ttk.Frame(self.notebook)
         filters_tab = ttk.Frame(self.notebook)
         transform_tab = ttk.Frame(self.notebook)
 
+        print("DEBUG: Adding tabs to notebook...")
         self.notebook.add(coordinates_tab, text='Coordinates')
         self.notebook.add(datasheet_tab, text='Datasheet')
         self.notebook.add(filters_tab, text='Filters')
         self.notebook.add(transform_tab, text='Transform')
 
+        print("DEBUG: Creating tab content...")
         self.create_coordinates_tab(coordinates_tab)
         self.create_datasheet_tab(datasheet_tab)
         self.create_filters_tab(filters_tab)
         self.create_transform_tab(transform_tab)
+        print("DEBUG: create_widgets completed!")
 
     # endregion
     # region Tab Creation
 
     def init_excel(self):
         """Initialize Excel only when needed"""
-        if self.datasheet_path:
+        if self.datasheets:
             try:
                 # Check if workbook reference is still valid
                 if self.excel_mgr.wb and self.excel_mgr.wb.name:
@@ -366,64 +671,112 @@ class DatasheetGeneratorApp:
                 self.excel_mgr.wb = None
                 self.excel_mgr.app = None
             
-            self.excel_mgr.open_workbook(self.datasheet_path)
+            self.excel_mgr.open_workbook(self.datasheets)
 
     def create_coordinates_tab(self, tab):
+        print("DEBUG: Starting create_coordinates_tab...")
 
         def get_combo_values():
-            td_values = []
-            pc_values = []
-            for key, value in self.td.items():
-                td_values = list(value.keys())
-                break
-            for key, value in self.pc.items():
-                pc_values = list(value.keys())
-                break
-            return td_values, pc_values
+            """Get combo values for all data types using centralized system"""
+            combo_values = {}
+            for data_type in self.get_all_data_types():
+                data = self.get_data_type_data(data_type)
+                values = []
+                for key, value in data.items():
+                    values = list(value.keys())
+                    break
+                combo_values[data_type] = values
+            return combo_values
 
-        def add_coordinate(coord_type, entry, combo, listbox):
+        def add_coordinate(data_type, entry, combo, listbox):
             coord = entry.get()
             value = combo.get()
             if coord and value:
-                if coord_type == "td":
-                    self.td_coordinate_values[coord] = value
-                    if not self.td_coordinate_values:
-                        self.top_tag = coord
-                else:
-                    self.pc_coordinate_values[coord] = value
+                coordinate_values = self.get_data_type_coordinate_values(data_type)
+                coordinate_values[coord] = value
+                self.set_data_type_coordinate_values(data_type, coordinate_values)
+                
+                # Set top tag for TD if it's the first coordinate
+                if data_type == "td" and not coordinate_values:
+                    self.top_tag = coord
                 update_listboxes()
 
-        def remove_coordinate(coord_type, listbox):
+        def remove_coordinate(data_type, listbox):
             selected = listbox.curselection()
             if selected:
                 idx = selected[0]
                 coord = listbox.get(idx).split(':')[0]
-                if coord_type == "td":
-                    del self.td_coordinate_values[coord]
-                else:
-                    del self.pc_coordinate_values[coord]
+                coordinate_values = self.get_data_type_coordinate_values(data_type)
+                if coord in coordinate_values:
+                    del coordinate_values[coord]
+                    self.set_data_type_coordinate_values(data_type, coordinate_values)
                 update_listboxes()
 
-        def clear_coordinates(coord_type, listbox):
-            if coord_type == "td":
-                self.td_coordinate_values.clear()
-            else:
-                self.pc_coordinate_values.clear()
+        def clear_coordinates(data_type, listbox):
+            self.set_data_type_coordinate_values(data_type, {})
             update_listboxes()
 
         def update_entry():
-            if self.datasheet_path:
+            if self.datasheets:
                 try:
-                    current_selection = xw.apps.active.selection.address
-                    current_selection = current_selection.split(':')[0].replace('$', '')
+                    full_selection = xw.apps.active.selection.address
+                    current_selection = full_selection.split(':')[0].replace('$', '')
                     entry_var.set(current_selection)
+                    
+                    # Update region display
+                    try:
+                        clean_selection = full_selection.replace('$', '')
+                        
+                        if ',' in clean_selection:
+                            # Non-contiguous selection (multiple ranges separated by commas)
+                            ranges = clean_selection.split(',')
+                            range_descriptions = []
+                            for i, range_addr in enumerate(ranges):
+                                if ':' in range_addr:
+                                    start_cell, end_cell = range_addr.split(':')
+                                    range_descriptions.append(f"Range{i+1}: {start_cell}:{end_cell}")
+                                else:
+                                    range_descriptions.append(f"Cell{i+1}: {range_addr}")
+                            
+                            # Create detailed display
+                            if len(ranges) <= 3:
+                                # Show all ranges if 3 or fewer
+                                region_var.set(f"Selected: {', '.join(range_descriptions)}")
+                            else:
+                                # Show count if more than 3 ranges
+                                region_var.set(f"Selected: {len(ranges)} Non-contiguous Ranges ({ranges[0]}, {ranges[1]}, ...)")
+                                
+                        elif ':' in clean_selection:
+                            # Single contiguous range
+                            start_cell, end_cell = clean_selection.split(':')
+                            region_var.set(f"Selected: Range {start_cell}:{end_cell}")
+                        else:
+                            # Single cell selected
+                            region_var.set(f"Selected: Single Cell {clean_selection}")
+                    except Exception as e:
+                        region_var.set("Selected: Single Cell")
+                    
+                    # Update cell values display
+                    try:
+                        sheet = xw.apps.active.books.active.sheets.active
+                        above_value, left_value = self.get_cell_values_above_and_left(sheet, current_selection)
+                        
+                        above_text = above_value if above_value else "—"
+                        left_text = left_value if left_value else "—"
+                        
+                        cell_values_var.set(f"Above: {above_text} | Left: {left_text}")
+                    except Exception as e:
+                        cell_values_var.set("Above: — | Left: —")
+                        
                 except:
                     pass
             tab.after(200, update_entry)
 
-        def update_td_listbox():
-            td_listbox.delete(0, tk.END)
-            for key, value in self.td_coordinate_values.items():
+        def update_listbox(data_type, listbox):
+            """Update a specific data type's listbox using centralized system"""
+            listbox.delete(0, tk.END)
+            coordinate_values = self.get_data_type_coordinate_values(data_type)
+            for key, value in coordinate_values.items():
                 # Add placeholder for conversion details
                 coord_display = f"{key}: {value}"
                 if key in self.coordinate_conversions:
@@ -432,40 +785,37 @@ class DatasheetGeneratorApp:
                 if key in self.coordinate_combinations:
                     combo = self.coordinate_combinations[key]
                     coord_display += f" [Combines: {', '.join(combo.get('combines', []))} ({combo.get('operation', 'add')})]"
-                td_listbox.insert(tk.END, coord_display)
-            try:
-                first_entry = td_listbox.get(0)
-                self.top_tag = first_entry.split(':')[0]
-            except:
-                print('failed to set top_tag')
-
-        def update_pc_listbox():
-            pc_listbox.delete(0, tk.END)
-            for key, value in self.pc_coordinate_values.items():
-                # Add placeholder for conversion details
-                coord_display = f"{key}: {value}"
-                if key in self.coordinate_conversions:
-                    conv = self.coordinate_conversions[key]
-                    coord_display += f" [{conv.get('in_unit', '?')}->{conv.get('out_unit', '?')}]"
-                if key in self.coordinate_combinations:
-                    combo = self.coordinate_combinations[key]
-                    coord_display += f" [Combines: {', '.join(combo.get('combines', []))} ({combo.get('operation', 'add')})]"
-                pc_listbox.insert(tk.END, coord_display)
+                listbox.insert(tk.END, coord_display)
+            
+            # Set top tag for TD if it's the first coordinate
+            if data_type == "td" and coordinate_values:
+                try:
+                    first_entry = listbox.get(0)
+                    self.top_tag = first_entry.split(':')[0]
+                except:
+                    print('failed to set top_tag')
 
         def update_listboxes():
-            update_td_listbox()
-            update_pc_listbox()
+            """Update all listboxes for all data types"""
+            for data_type in self.get_all_data_types():
+                listbox_name = f"{data_type}_listbox"
+                if hasattr(self, listbox_name):
+                    listbox = getattr(self, listbox_name)
+                    update_listbox(data_type, listbox)
 
         def reinitialize():
             #init_excel()
-            td_values, pc_values = get_combo_values()
-            td_combo['values'] = td_values
-            pc_combo['values'] = pc_values
+            combo_values = get_combo_values()
+            for data_type in self.get_all_data_types():
+                combo_name = f"{data_type}_combo"
+                if hasattr(self, combo_name):
+                    combo = getattr(self, combo_name)
+                    combo['values'] = combo_values.get(data_type, [])
             update_listboxes()
 
         # Initial Excel setup if path exists
         #init_excel()
-        td_combo_values, pc_combo_values = get_combo_values()
+        combo_values = get_combo_values()
 
         # UI Setup (same as before)
         top_frame = ttk.Frame(tab)
@@ -478,54 +828,166 @@ class DatasheetGeneratorApp:
         coord_entry = ttk.Entry(top_frame, textvariable=entry_var)
         coord_entry.pack(side="left", fill="x", expand=True)
 
+        # Cell values display frame
+        values_frame = ttk.Frame(tab)
+        values_frame.pack(fill="x", padx=10, pady=2)
+        
+        cell_values_var = tk.StringVar()
+        cell_values_var.set("Above: — | Left: —")
+        cell_values_label = ttk.Label(values_frame, textvariable=cell_values_var, 
+                                     font=("Arial", 9), foreground="gray")
+        cell_values_label.pack(side="left")
+
+        # Region selection display frame
+        region_frame = ttk.Frame(tab)
+        region_frame.pack(fill="x", padx=10, pady=2)
+        
+        region_var = tk.StringVar()
+        region_var.set("Selected: Single Cell")
+        region_label = ttk.Label(region_frame, textvariable=region_var, 
+                                font=("Arial", 9), foreground="blue")
+        region_label.pack(side="left")
+
         content_frame = ttk.Frame(tab)
         content_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        td_frame = ttk.LabelFrame(content_frame, text="TD Coordinates")
-        td_frame.pack(side="left", fill="both", expand=True, padx=5)
+        # Dynamically create frames for all data types
+        for data_type in self.get_all_data_types():
+            config = self.get_data_type_config(data_type)
+            short_name = config.get('short_name', data_type.upper())
+            
+            # Create frame for this data type
+            data_frame = ttk.LabelFrame(content_frame, text=f"{short_name} Coordinates")
+            data_frame.pack(side="left", fill="both", expand=True, padx=5)
 
-        td_controls = ttk.Frame(td_frame)
-        td_controls.pack(fill="x", padx=5, pady=5)
+            # Controls frame
+            controls = ttk.Frame(data_frame)
+            controls.pack(fill="x", padx=5, pady=5)
 
-        td_label = ttk.Label(td_controls, text="Select TD Value:")
-        td_label.pack(side="left")
+            # Label
+            label = ttk.Label(controls, text=f"Select {short_name} Value:")
+            label.pack(side="left")
 
-        td_combo = ttk.Combobox(td_controls, values=td_combo_values, state="readonly")
-        td_combo.pack(side="left", fill="x", expand=True, padx=5)
+            # Combo box
+            combo = ttk.Combobox(controls, values=combo_values.get(data_type, []), state="readonly")
+            combo.pack(side="left", fill="x", expand=True, padx=5)
 
-        td_btn_frame = ttk.Frame(td_frame)
-        td_btn_frame.pack(fill="x", padx=5)
+            # Button frame
+            btn_frame = ttk.Frame(data_frame)
+            btn_frame.pack(fill="x", padx=5)
 
-        td_listbox = tk.Listbox(td_frame, height=15)
-        td_listbox.pack(fill="both", expand=True, padx=5, pady=5)
+            # Listbox
+            listbox = tk.Listbox(data_frame, height=15)
+            listbox.pack(fill="both", expand=True, padx=5, pady=5)
 
-        ttk.Button(td_btn_frame, text="Add to TD",
-                   command=lambda: add_coordinate("td", coord_entry, td_combo, td_listbox)).pack(side="left", padx=2)
-        ttk.Button(td_btn_frame, text="Remove",
-                   command=lambda: remove_coordinate("td", td_listbox)).pack(side="left", padx=2)
-        ttk.Button(td_btn_frame, text="Clear All",
-                   command=lambda: clear_coordinates("td", td_listbox)).pack(side="left", padx=2)
+            # Buttons
+            ttk.Button(btn_frame, text=f"Add to {short_name}",
+                       command=lambda dt=data_type, e=coord_entry, c=combo, l=listbox: add_coordinate(dt, e, c, l)).pack(side="left", padx=2)
+            ttk.Button(btn_frame, text="Remove",
+                       command=lambda dt=data_type, l=listbox: remove_coordinate(dt, l)).pack(side="left", padx=2)
+            ttk.Button(btn_frame, text="Clear All",
+                       command=lambda dt=data_type, l=listbox: clear_coordinates(dt, l)).pack(side="left", padx=2)
+            
+            # Semantic mapping button
+            def semantic_map_coordinate(dt=data_type, combo_box=combo):
+                current_coord = coord_entry.get().strip()
+                if not current_coord:
+                    messagebox.showwarning("Warning", "Please select a coordinate first")
+                    return
+                
+                print(f"DEBUG: Auto Map clicked for data_type: '{dt}'")
+                print(f"DEBUG: Current coordinate: '{current_coord}'")
+                
+                # Load semantic model if not already loaded
+                if not self.model_loaded and not self.loading_model:
+                    self.load_semantic_model_async()
+                    messagebox.showinfo("Info", "Loading semantic model. Please try again in a moment.")
+                    return
+                
+                # Perform semantic mapping
+                best_match = self.auto_map_coordinate_semantic(dt, current_coord)
+                if best_match:
+                    # Set the combo box to the best match
+                    combo_box.set(best_match)
+                    # Automatically add the coordinate
+                    add_coordinate(dt, coord_entry, combo_box, listbox)
+            
+            ttk.Button(btn_frame, text="Auto Map",
+                       command=lambda dt=data_type, cb=combo: semantic_map_coordinate(dt, cb)).pack(side="left", padx=2)
+                       
+            # Blind AutoMap button
+            def blind_automap_coordinate(dt=data_type, combo_box=combo):
+                try:
+                    # Ask user for minimum score threshold
+                    min_score = self.get_min_score_threshold()
+                    if min_score is None:
+                        return  # User cancelled
+                    
+                    full_selection = xw.apps.active.selection.address
+                    
+                    # Load semantic model if not already loaded
+                    if not self.model_loaded and not self.loading_model:
+                        self.load_semantic_model_async()
+                        return
+                    
+                    # Check selection type
+                    clean_selection = full_selection.replace('$', '')
+                    
+                    if ',' in clean_selection:
+                        # Non-contiguous selection - process multiple ranges
+                        self.blind_automap_noncontiguous(dt, full_selection, combo_box, coord_entry, listbox, min_score)
+                    elif ':' in full_selection:
+                        # Single contiguous range - iterate through cells
+                        self.blind_automap_range(dt, full_selection, combo_box, coord_entry, listbox, min_score)
+                    else:
+                        # Single cell - perform silent mapping
+                        current_coord = coord_entry.get().strip()
+                        if current_coord:
+                            best_match, score = self.auto_map_coordinate_semantic_silent(dt, current_coord, min_score)
+                            if best_match:
+                                combo_box.set(best_match)
+                                add_coordinate(dt, coord_entry, combo_box, listbox)
+                                messagebox.showinfo("Blind AutoMap Result", 
+                                    f"Successfully mapped {current_coord} to '{best_match}'\nSimilarity Score: {score:.3f}")
+                            else:
+                                messagebox.showinfo("Blind AutoMap Result", 
+                                    f"No match found for {current_coord}\nBest Score: {score:.3f} (below threshold {min_score})")
+                except Exception as e:
+                    print(f"Error in blind automap: {e}")
+            
+            ttk.Button(btn_frame, text="Blind AutoMap",
+                       command=lambda dt=data_type, cb=combo: blind_automap_coordinate(dt, cb)).pack(side="left", padx=2)
 
-        xfn_button = ttk.Button(content_frame, text="Transformation\nCode and Key", command=lambda: self.notebook.select(3))
-        xfn_button.pack(side="left", padx=10)
+            # Store references for later use
+            setattr(self, f"{data_type}_combo", combo)
+            setattr(self, f"{data_type}_listbox", listbox)
 
-        pc_frame = ttk.LabelFrame(content_frame, text="PC Coordinates")
-        pc_frame.pack(side="left", fill="both", expand=True, padx=5)
-
-        pc_controls = ttk.Frame(pc_frame)
-        pc_controls.pack(fill="x", padx=5, pady=5)
-
-        pc_label = ttk.Label(pc_controls, text="Select PC Value:")
-        pc_label.pack(side="left")
-
-        pc_combo = ttk.Combobox(pc_controls, values=pc_combo_values, state="readonly")
-        pc_combo.pack(side="left", fill="x", expand=True, padx=5)
-
-        pc_btn_frame = ttk.Frame(pc_frame)
-        pc_btn_frame.pack(fill="x", padx=5)
-
-        pc_listbox = tk.Listbox(pc_frame, height=15)
-        pc_listbox.pack(fill="both", expand=True, padx=5, pady=5)
+        # Transformation button (only show if we have data types)
+        if self.get_all_data_types():
+            xfn_button = ttk.Button(content_frame, text="Transformation\nCode and Key", command=lambda: self.notebook.select(3))
+            xfn_button.pack(side="left", padx=10)
+        
+        # Semantic mapping status and controls
+        semantic_frame = ttk.LabelFrame(tab, text="Semantic Mapping", padding="10")
+        semantic_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Status indicator
+        self.semantic_status_label = ttk.Label(semantic_frame, text="Semantic model: Not loaded", foreground="red")
+        self.semantic_status_label.pack(side="left", padx=5)
+        
+        # Load model button
+        def load_semantic_model():
+            if not self.model_loaded and not self.loading_model:
+                self.load_semantic_model_async()
+                self.semantic_status_label.config(text="Semantic model: Loading...", foreground="orange")
+        
+        ttk.Button(semantic_frame, text="Load Semantic Model", 
+                   command=load_semantic_model).pack(side="left", padx=5)
+        
+        # Help text
+        help_text = "Auto Map: Uses AI to find the best matching field from your data based on text above/left of selected cell"
+        ttk.Label(semantic_frame, text=help_text, font=("Arial", 9), 
+                 foreground="gray").pack(side="left", padx=10)
 
         # --- Context Menu Setup ---
         self.coord_context_menu = tk.Menu(tab, tearoff=0)
@@ -540,7 +1002,7 @@ class DatasheetGeneratorApp:
 
         self.selected_coord_for_context = None # Store the coordinate clicked on
 
-        def show_coord_context_menu(event, listbox_widget, coord_type):
+        def show_coord_context_menu(event, listbox_widget, data_type):
             # Select the item under the cursor
             clicked_index = listbox_widget.nearest(event.y)
             listbox_widget.selection_clear(0, tk.END)
@@ -569,17 +1031,13 @@ class DatasheetGeneratorApp:
             finally:
                 self.coord_context_menu.grab_release()
 
-        # Bind right-click to both listboxes
-        td_listbox.bind("<Button-3>", lambda event: show_coord_context_menu(event, td_listbox, 'td'))
-        pc_listbox.bind("<Button-3>", lambda event: show_coord_context_menu(event, pc_listbox, 'pc'))
+        # Bind right-click to all listboxes dynamically
+        for data_type in self.get_all_data_types():
+            listbox_name = f"{data_type}_listbox"
+            if hasattr(self, listbox_name):
+                listbox = getattr(self, listbox_name)
+                listbox.bind("<Button-3>", lambda event, l=listbox, dt=data_type: show_coord_context_menu(event, l, dt))
         # ---
-
-        ttk.Button(pc_btn_frame, text="Add to PC",
-                   command=lambda: add_coordinate("pc", coord_entry, pc_combo, pc_listbox)).pack(side="left", padx=2)
-        ttk.Button(pc_btn_frame, text="Remove",
-                   command=lambda: remove_coordinate("pc", pc_listbox)).pack(side="left", padx=2)
-        ttk.Button(pc_btn_frame, text="Clear All",
-                   command=lambda: clear_coordinates("pc", pc_listbox)).pack(side="left", padx=2)
 
         update_listboxes()
         tab.after(200, update_entry)
@@ -589,6 +1047,7 @@ class DatasheetGeneratorApp:
         return tab
 
     def create_datasheet_tab(self, tab):
+        print("DEBUG: Starting create_datasheet_tab...")
         fields = [
             ("Source Sheet Name (Leave blank to only update existing)", "source_sheet_name", ttk.Combobox),
             ("Datasheet Coordinate", "datasheet_coord", ttk.Entry),
@@ -600,7 +1059,82 @@ class DatasheetGeneratorApp:
 
         entries = {}
         for i, (label, attr, widget_type) in enumerate(fields):
-            ttk.Label(tab, text=label).grid(row=i, column=0, padx=5, pady=5, sticky="w")
+            # Create a frame for label and help button (for Top Tag only)
+            if attr == "top_tag":
+                label_frame = ttk.Frame(tab)
+                label_frame.grid(row=i, column=0, padx=5, pady=5, sticky="w")
+                
+                ttk.Label(label_frame, text=label).pack(side="left")
+                
+                # Add help button
+                def show_top_tag_help():
+                    help_text = """Top Tag - Key Coordinate
+
+This is the Excel cell coordinate (e.g., A1, I12) where the tag identifier is placed in each datasheet.
+
+WHAT IT DOES:
+• Places the dictionary key (tag identifier) at this coordinate
+• Serves as the anchor point for all tag-related operations
+• Used to identify existing tags when updating sheets
+• Used to place new tags when creating sheets
+• Calculates row offsets for positioning other data
+
+HOW IT WORKS WITH COORDINATE-VALUE DATA:
+The Top Tag and Coordinate-Value Data work together:
+
+1. TOP TAG: Determines WHERE the tag goes
+   - Places the dictionary key (e.g., "TAG-001") at the specified coordinate
+   - Example: If Top Tag = "A1", then "TAG-001" goes in cell A1
+
+2. COORDINATE-VALUE DATA: Determines WHAT data goes where
+   - Contains mapping of coordinates to values for each tag
+   - Example: {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}
+
+COMPLETE PROCESS FLOW:
+1. System reads your data: {"TAG-001": {"B1": "Line 1", "C1": "PID-001"}}
+2. Top Tag places "TAG-001" at the key coordinate (e.g., A1)
+3. Coordinate-Value Data places "Line 1" at B1, "PID-001" at C1, etc.
+
+EXAMPLE WITH DETAILS:
+If Top Tag = "A1" and you have data like:
+{"TAG-001": {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}}
+
+Result in Excel:
+• Cell A1: "TAG-001" (the tag identifier from dictionary key)
+• Cell B1: "Line 1" (from coordinate-value data)
+• Cell C1: "PID-001" (from coordinate-value data)
+• Cell D1: "100.5" (from coordinate-value data)
+
+AUTOMATIC SETTING:
+• The Top Tag is automatically set to the first coordinate you add for the primary data type
+• You can manually change it if needed
+
+IMPORTANT NOTES:
+• The Top Tag is the ANCHOR POINT for all tag operations
+• All other data positioning is calculated relative to this coordinate
+• When updating existing sheets, the system looks for tags at this coordinate
+• When creating new sheets, tags are placed at this coordinate"""
+                    
+                    help_window = tk.Toplevel(tab)
+                    help_window.title("Top Tag Help")
+                    help_window.geometry("500x400")
+                    help_window.transient(tab)
+                    help_window.grab_set()
+                    
+                    # Create scrolled text widget
+                    text_widget = scrolledtext.ScrolledText(help_window, wrap=tk.WORD, padx=10, pady=10)
+                    text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+                    text_widget.insert(tk.END, help_text)
+                    text_widget.configure(state='disabled')
+                    
+                    # Close button
+                    ttk.Button(help_window, text="Close", command=help_window.destroy).pack(pady=10)
+                
+                help_btn = ttk.Button(label_frame, text="?", width=3, command=show_top_tag_help)
+                help_btn.pack(side="left", padx=(5, 0))
+            else:
+                ttk.Label(tab, text=label).grid(row=i, column=0, padx=5, pady=5, sticky="w")
+            
             w = widget_type(tab)
             w.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
             if hasattr(self, attr):
@@ -656,6 +1190,7 @@ class DatasheetGeneratorApp:
         tab.grid_columnconfigure(1, weight=1)
 
     def create_filters_tab(self, tab):
+        print("DEBUG: Starting create_filters_tab...")
         # Add filter frame
 
         # Add explanatory label for filter functionality
@@ -665,9 +1200,10 @@ class DatasheetGeneratorApp:
         add_frame.pack(fill="x", padx=5, pady=5)
 
         filters_entries = []
+        # Get TD combo values using centralized system
+        td_data = self.get_data_type_data('td')
         td_combo_values = []
-
-        for key, value in self.td.items():
+        for key, value in td_data.items():
             td_combo_values = list(value.keys())
             break
 
@@ -713,21 +1249,47 @@ class DatasheetGeneratorApp:
         add_filter_row()  # Add empty row
 
     def create_transform_tab(self, tab):
+        print("DEBUG: Starting create_transform_tab...")
+        # Source data type selector
+        data_type_frame = ttk.Frame(tab)
+        data_type_frame.pack(fill="x", padx=5, pady=5)
+
+        ttk.Label(data_type_frame, text="Source Data Type:").pack(side="left")
+
+        # Get available data types for combo
+        data_type_values = [self.get_data_type_name(dt) for dt in self.get_all_data_types()]
+        data_type_combo = ttk.Combobox(data_type_frame, values=data_type_values)
+        data_type_combo.pack(side="left", fill="x", expand=True, padx=5)
+        
+        # Set default to first data type
+        if data_type_values:
+            data_type_combo.set(data_type_values[0])
+
         # Source key selector
         key_frame = ttk.Frame(tab)
         key_frame.pack(fill="x", padx=5, pady=5)
 
-        ttk.Label(key_frame, text="Index Source Key:").pack(side="left")
+        ttk.Label(key_frame, text="Source Key:").pack(side="left")
 
-        td_combo_values = []
-        for key, value in self.td.items():
-            td_combo_values = list(value.keys())
-            break
-
-        key_combo = ttk.Combobox(key_frame, values=td_combo_values)
+        key_combo = ttk.Combobox(key_frame, values=[])
         key_combo.pack(side="left", fill="x", expand=True, padx=5)
-        if self.td_xkey:
-            key_combo.set(self.td_xkey)
+
+        # Update key combo when data type changes
+        def update_key_combo(*args):
+            selected_data_type_name = data_type_combo.get()
+            data_type = self.get_data_type_by_name(selected_data_type_name)
+            if data_type:
+                data = self.get_data_type_data(data_type)
+                if data:
+                    # Get keys from first item
+                    first_item = list(data.values())[0]
+                    key_values = list(first_item.keys())
+                    key_combo['values'] = key_values
+                    if key_values:
+                        key_combo.set(key_values[0])
+
+        data_type_combo.bind('<<ComboboxSelected>>', update_key_combo)
+        update_key_combo()  # Initialize
 
         # Transformation code entry
         code_frame = ttk.Frame(tab)
@@ -773,8 +1335,12 @@ class DatasheetGeneratorApp:
         ttk.Button(test_frame, text="Test", command=test_transform).pack(pady=5)
 
         def save_transform():
-            self.td_xkey = key_combo.get()
+            selected_data_type_name = data_type_combo.get()
+            data_type = self.get_data_type_by_name(selected_data_type_name)
+            self.current_transform_data_type = data_type
+            self.current_transform_key = key_combo.get()
             self.transformation_code = code_entry.get()
+            print(f"Transform saved - Data Type: {selected_data_type_name}, Key: {self.current_transform_key}, Code: {self.transformation_code}")
 
         ttk.Button(tab, text="Save", command=save_transform).pack(pady=5)
 
@@ -864,9 +1430,10 @@ class DatasheetGeneratorApp:
 
         filters_entries = []
 
+        # Get TD combo values using centralized system
+        td_data = self.get_data_type_data('td')
         td_combo_values = []
-        # Example values for the combo box
-        for key, value in self.td.items():
+        for key, value in td_data.items():
             td_combo_values = list(value.keys())
             print(list(td_combo_values))
             break
@@ -927,11 +1494,12 @@ class DatasheetGeneratorApp:
 
     def generate_process_conditions(self):
         # Pass the tolerance value
-        self.pc = generate_dictionary_from_xlsx(self.process_conditions_path, self.pc_headers,
-                                              parent=self.root, selected_sheets=self.pc_selected_sheets,
+        pc_data = generate_dictionary_from_xlsx(self.get_data_type_path('pc'), self.get_data_type_headers('pc'),
+                                              parent=self.root, selected_sheets=self.get_data_type_selected_sheets('pc'),
                                               max_empty_allowed=self.blank_cell_tolerance)
-        if self.pc is not None: # Check if generation was successful (not cancelled)
-             show_nested_dict_analysis(self.pc)
+        if pc_data is not None: # Check if generation was successful (not cancelled)
+             self.set_data_type_data('pc', pc_data)
+             show_nested_dict_analysis(pc_data)
              print("Generated Process Conditions")
              self.refresh_tab_content()
         else:
@@ -939,20 +1507,26 @@ class DatasheetGeneratorApp:
 
     def generate_tag_data(self):
         print("Generating Tag Data")
-        print(self.tag_data_path)
-        print(self.td_headers)
+        print(self.get_data_type_path('td'))
+        print(self.get_data_type_headers('td'))
         # Pass the tolerance value
-        self.td = generate_dictionary_from_xlsx(self.tag_data_path, self.td_headers,
-                                              parent=self.root, selected_sheets=self.td_selected_sheets,
+        td_data = generate_dictionary_from_xlsx(self.get_data_type_path('td'), self.get_data_type_headers('td'),
+                                              parent=self.root, selected_sheets=self.get_data_type_selected_sheets('td'),
                                               max_empty_allowed=self.blank_cell_tolerance)
-        if self.td is not None: # Check if generation was successful
-             show_nested_dict_analysis(self.td)
+        if td_data is not None: # Check if generation was successful
+             self.set_data_type_data('td', td_data)
+             show_nested_dict_analysis(td_data)
              print("Generated Tag Data")
              self.refresh_tab_content()
         else:
              print("Tag Data generation cancelled or failed.")
 
     def assign_value_coordinate_to_tag(self):
+        """Legacy method - now calls the dynamic version"""
+        self.assign_value_coordinate_to_tag_dynamic()
+    
+    def assign_value_coordinate_to_tag_dynamic(self):
+        """Dynamic version that works with any data types"""
         print("Generating Coordinate-Value Data")
         self.tag_cell_values = {}  # 'a1':'LINE', 'a2':'PID' ...
         
@@ -1038,7 +1612,9 @@ class DatasheetGeneratorApp:
                     print(f"  Error processing combination {coord}: {e}")
                     continue
         
-        for tag in self.td:
+        # Process TD data (assuming TD is the primary data type for tags)
+        td_data = self.get_data_type_data('td')
+        for tag in td_data:
             if tag:
                 # filter out
                 continue_flag = False
@@ -1049,18 +1625,21 @@ class DatasheetGeneratorApp:
                     acceptable_values = [value.strip() for value in filter_key.split(',')]
 
                     # If the tag's value for this header isn't in our acceptable values, filter it out
-                    if self.td[tag][header] not in acceptable_values:
+                    if td_data[tag][header] not in acceptable_values:
                         continue_flag = True
                         break
 
                 if continue_flag:
                     continue
 
-                # Process TD coordinates
+                # Process coordinates for all data types
                 data = {}
-                for coordinate, value in self.td_coordinate_values.items():
+                
+                # Process TD coordinates first
+                td_coordinate_values = self.get_data_type_coordinate_values('td')
+                for coordinate, value in td_coordinate_values.items():
                     print(f'tag {tag}, value {value}, coord {coordinate}')
-                    raw_value = self.td[tag].get(value) # Use .get() for safety
+                    raw_value = td_data[tag].get(value) # Use .get() for safety
                     processed_value = process_coordinate_value(coordinate, raw_value)
                     data[coordinate] = processed_value
                     if processed_value is None:
@@ -1069,15 +1648,19 @@ class DatasheetGeneratorApp:
                 # Apply combinations to TD data
                 apply_combinations(data)
                 
+                # Process PC coordinates
                 try:
-                    interface = translate(self.td[tag][self.td_xkey], self.transformation_code)
+                    interface = translate(td_data[tag][self.td_xkey], self.transformation_code)
                     print(f'tag: {tag}, td_xkey: {self.td_xkey}, interface: {interface}')
-                    print("length ", len(self.pc_coordinate_values))
+                    
+                    pc_data = self.get_data_type_data('pc')
+                    pc_coordinate_values = self.get_data_type_coordinate_values('pc')
+                    print("length ", len(pc_coordinate_values))
 
-                    for coordinate, value in self.pc_coordinate_values.items():
+                    for coordinate, value in pc_coordinate_values.items():
                         print("value ", value)
                         try:
-                            raw_value = self.pc[interface].get(value) # Use .get() for safety
+                            raw_value = pc_data[interface].get(value) # Use .get() for safety
                             processed_value = process_coordinate_value(coordinate, raw_value)
                             data[coordinate] = processed_value
                             if processed_value is None:
@@ -1094,17 +1677,101 @@ class DatasheetGeneratorApp:
                 except Exception as e:
                     print(f'xkey pc interface fail for tag {tag}: {e}')
 
-                # Apply combinations to PC data as well
+                # Apply combinations to all data
                 apply_combinations(data)
 
                 self.tag_cell_values[tag] = data
 
         print("Coordinate Values generated:", self.tag_cell_values)
+    
+    def assign_value_coordinate_to_tag_simple_dynamic(self):
+        """Simplified dynamic version that works with any data types"""
+        print("Generating Coordinate-Value Data (Dynamic)")
+        self.tag_cell_values = {}
+        
+        # Get the primary data type (first one defined)
+        primary_data_type = list(self.get_all_data_types())[0]
+        primary_data = self.get_data_type_data(primary_data_type)
+        
+        if not primary_data:
+            print(f"No data available for {primary_data_type}")
+            return
+        
+        # Process each item in the primary data type
+        for item_key, item_data in primary_data.items():
+            if not item_key:
+                continue
+            
+            # Apply filters if they exist
+            if hasattr(self, 'tag_filters') and self.tag_filters:
+                continue_flag = False
+                for header, filter_key in self.tag_filters:
+                    acceptable_values = [value.strip() for value in filter_key.split(',')]
+                    if item_data.get(header) not in acceptable_values:
+                        continue_flag = True
+                        break
+                
+                if continue_flag:
+                    continue
+            
+            # Process coordinates for all data types
+            data = {}
+            
+            # Process coordinates for each data type
+            for data_type in self.get_all_data_types():
+                coordinate_values = self.get_data_type_coordinate_values(data_type)
+                data_type_data = self.get_data_type_data(data_type)
+                
+                if not data_type_data:
+                    continue
+                
+                # For primary data type, use the item directly
+                if data_type == primary_data_type:
+                    for coordinate, value in coordinate_values.items():
+                        raw_value = item_data.get(value)
+                        data[coordinate] = raw_value
+                else:
+                    # For other data types, try to find matching data
+                    # This is a simplified approach - you might need more complex logic
+                    for coordinate, value in coordinate_values.items():
+                        # Try to find matching data based on some key
+                        # This is where you'd implement your specific logic
+                        data[coordinate] = None  # Placeholder
+            
+            self.tag_cell_values[item_key] = data
+        
+        print("Coordinate Values generated (Dynamic):", self.tag_cell_values)
 
+    def check_halt_flag(self):
+        """Callback function to check if the process should be halted"""
+        return self.halt_flag
+    
+    def reset_halt_flag(self):
+        """Reset the halt flag to False"""
+        self.halt_flag = False
+    
+    def set_halt_flag(self):
+        """Set the halt flag to True to stop the process"""
+        self.halt_flag = True
+        print("Halt flag set - process will stop at next opportunity")
+        if hasattr(self, 'status_label'):
+            self.status_label.config(text="Stopping...", fg="orange")
+    
+    def update_status(self, message, color="black"):
+        """Update the status label if it exists"""
+        if hasattr(self, 'status_label'):
+            self.status_label.config(text=message, fg=color)
+    
     def add_datasheets(self):
         print('assigning tag coordinates')
+        self.update_status("Assigning tag coordinates...", "blue")
         self.assign_value_coordinate_to_tag()
         print("Adding/Updating Datasheets")
+        self.update_status("Adding/Updating Datasheets...", "blue")
+        
+        # Reset halt flag at the start
+        self.reset_halt_flag()
+        self.is_processing = True
         
         try:
             # Force reinitialization of Excel connection
@@ -1132,16 +1799,27 @@ class DatasheetGeneratorApp:
                                             self.ds_str, rows_per_sheet=self.rows_per_sheet,
                                             key_coordinate=self.top_tag,
                                             sig_figs=self.sig_figs, # Pass sig_figs
-                                            tolerance=self.rounding_tolerance) # Pass tolerance
+                                            tolerance=self.rounding_tolerance, # Pass tolerance
+                                            halt_callback=self.check_halt_flag) # Pass halt callback
             self.excel_mgr.mark_as_modified()
-            print("DONE")
+            
+            if self.halt_flag:
+                print("Process was halted by user")
+                self.update_status("Process halted by user", "orange")
+                messagebox.showinfo("Process Halted", "The datasheet addition process was halted by the user.")
+            else:
+                print("DONE")
+                self.update_status("Process completed successfully", "green")
         except Exception as e:
             print(f"Excel connection error: {e}")
+            self.update_status("Error occurred", "red")
             messagebox.showerror("Excel Connection Error", 
                                "Excel connection lost. Please ensure Excel is open and try again.")
             # Reset Excel connection
             self.excel_mgr.wb = None
             self.excel_mgr.app = None
+        finally:
+            self.is_processing = False
 
     # endregion
 
@@ -1242,14 +1920,16 @@ class DatasheetGeneratorApp:
 
     def load_td_from_datasheet(self):
         def set_td(td):
-            self.td = td
+            self.set_data_type_data('td', td)
+            self.refresh_tab_content()
 
         app_window = tk.Toplevel(root)
         DatasheetExtractor(app_window, callback=set_td)
 
     def load_pc_from_datasheet(self):
         def set_pc(pc):
-            self.pc = pc
+            self.set_data_type_data('pc', pc)
+            self.refresh_tab_content()
 
         app_window = tk.Toplevel(root)
         DatasheetExtractor(app_window, callback=set_pc)
@@ -1263,7 +1943,54 @@ class DatasheetGeneratorApp:
         # Check if a file was selected
         if file_path:
             # Load the JSON file using load_dict_from_json
-            self.td = load_dict_from_json(file_path)
+            td_data = load_dict_from_json(file_path)
+            self.set_data_type_data('td', td_data)
+            self.refresh_tab_content()
+    
+    def load_data_type_from_datasheet(self, data_type):
+        """Load data for any data type from datasheet"""
+        config = self.get_data_type_config(data_type)
+        name = config.get('name', data_type.upper())
+        
+        def set_data(data):
+            self.set_data_type_data(data_type, data)
+            self.refresh_tab_content()
+            print(f"{name} data loaded from datasheet")
+        
+        app_window = tk.Toplevel(self.root)
+        DatasheetExtractor(app_window, callback=set_data)
+
+    def load_data_type_from_json(self, data_type):
+        """Load data for any data type from JSON file"""
+        config = self.get_data_type_config(data_type)
+        name = config.get('name', data_type.upper())
+        
+        # Ask the user to select a JSON file
+        file_path = filedialog.askopenfilename(
+            title=f"Select JSON file for {name}",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            data = load_dict_from_json(file_path)
+            self.set_data_type_data(data_type, data)
+            self.refresh_tab_content()
+            print(f"{name} data loaded from JSON")
+
+    def update_data_type_keys(self, data_type):
+        """Update keys for any data type using transformation code"""
+        config = self.get_data_type_config(data_type)
+        name = config.get('name', data_type.upper())
+        
+        code = askstring(f"Enter transformation code for keys in {name}", 
+                        f"Enter transformation code for {name}",
+                        initialvalue='"-".join(x.split("-")[-2:])')
+        
+        if code:
+            data = self.get_data_type_data(data_type)
+            transformed_data = transform_dictionary(data, code)
+            self.set_data_type_data(data_type, transformed_data)
+            print(f"{name} keys updated")
 
     # endregion
 
@@ -1273,18 +2000,42 @@ class DatasheetGeneratorApp:
 
         print(f"Viewing {text}")
 
-        if text == "Process Conditions":
-            # open a new tkinter popup window with a scroll bar showing all the key-value pairs in the self.pc dictionary
-            self.display_process_conditions()
-        if text == "Instrument Index":
-            # open a new tkinter popup window with a scroll bar showing all the key-value pairs in the self.pc dictionary
-            self.display_tag_data()
         if text == "Coordinate-Value Data":
             # open a new tkinter popup window with a scroll bar showing all the key-value pairs in the self.pc dictionary
             self.display_coordinate_values()
-        if text == "Datasheets":
+        elif text == "Datasheets":
             # open a new tkinter popup window with a scroll bar showing all the key-value pairs in the self.pc dictionary
-            os.startfile(self.datasheet_path)
+            os.startfile(self.datasheets)
+        else:
+            # Check if it's a data type
+            data_type = self.get_data_type_by_name(text)
+            if data_type:
+                self.display_data_type(data_type)
+            else:
+                print(f"Unknown data type: {text}")
+    
+    def display_data_type(self, data_type):
+        """Display data for any data type using the centralized system"""
+        config = self.get_data_type_config(data_type)
+        name = config.get('name', data_type.upper())
+        data = self.get_data_type_data(data_type)
+        
+        # Create a new window
+        view_window = tk.Toplevel(self.root)
+        view_window.title(name)
+
+        # Create a scrolled text widget to display the data
+        scrolled_text = scrolledtext.ScrolledText(view_window, width=40, height=20)
+        scrolled_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)  # Fill and expand to fill the window
+
+        # Display the data content in the scrolled text widget
+        if data:
+            for key, value in data.items():
+                scrolled_text.insert(tk.END, f"{key}: {value}\n\n")
+        else:
+            scrolled_text.insert(tk.END, f"No {name} data available.")
+
+        scrolled_text.configure(state='disabled')  # Make read-only
 
     def display_process_conditions(self):
         # Create a new window
@@ -1296,8 +2047,9 @@ class DatasheetGeneratorApp:
         scrolled_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)  # Fill and expand to fill the window
 
         # Display the process conditions content in the scrolled text widget
-        if self.pc:
-            for key, value in self.pc.items():
+        pc_data = self.get_data_type_data('pc')
+        if pc_data:
+            for key, value in pc_data.items():
                 scrolled_text.insert(tk.END, f"{key}: {value}\n\n")
         else:
             scrolled_text.insert(tk.END, "No process conditions data available.")
@@ -1314,8 +2066,9 @@ class DatasheetGeneratorApp:
         scrolled_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)  # Fill and expand to fill the window
 
         # Display the process conditions content in the scrolled text widget
-        if self.td:
-            for key, value in self.td.items():
+        td_data = self.get_data_type_data('td')
+        if td_data:
+            for key, value in td_data.items():
                 scrolled_text.insert(tk.END, f"{key}: {value}\n\n")
         else:
             scrolled_text.insert(tk.END, "No tag data available.")
@@ -1386,10 +2139,10 @@ class DatasheetGeneratorApp:
         ExcelEditorApp(edit_xlsx_window)
 
     def get_sheet_names(self):
-        if not self.datasheet_path:
+        if not self.datasheets:
             return []
         try:
-            wb = openpyxl.load_workbook(self.datasheet_path, read_only=True)
+            wb = openpyxl.load_workbook(self.datasheets, read_only=True)
             return wb.sheetnames
         except Exception as e:
             print(f"Error getting sheet names: {e}")
@@ -1418,7 +2171,15 @@ class DatasheetGeneratorApp:
         elif variable == "coordinate_value":
             filename = self.coordinate_value_path
         elif variable == "datasheets":
-            filename = self.datasheet_path
+            filename = self.datasheets
+        else:
+            # Check if it's a data type path
+            for data_type in self.get_all_data_types():
+                config = self.get_data_type_config(data_type)
+                path_key = config.get('path_key', f'{data_type}_path')
+                if variable == path_key:
+                    filename = getattr(self, path_key, '')
+                    break
 
         entry.delete(0, tk.END)
         entry.insert(0, filename)
@@ -1433,69 +2194,91 @@ class DatasheetGeneratorApp:
 
     def browse(self, entry, variable):
         filename = filedialog.askopenfilename()
-        entry.delete(0, tk.END)
-        entry.insert(0, filename)
+        # Only update the entry if a file was actually selected (not canceled)
+        if filename:
+            entry.delete(0, tk.END)
+            entry.insert(0, filename)
 
-        if variable == "process_conditions_path":
-            self.process_conditions_path = filename
-        elif variable == "tag_data_path":
-            self.tag_data_path = filename
-        elif variable == "coordinate_value":
-            self.coordinate_value_path = filename
-        elif variable == "datasheets":
-            self.datasheet_path = filename
-            print(self.datasheet_path)
+        # Only update instance variables if a file was actually selected
+        if filename:
+            if variable == "process_conditions_path":
+                self.process_conditions_path = filename
+            elif variable == "tag_data_path":
+                self.tag_data_path = filename
+            elif variable == "coordinate_value":
+                self.coordinate_value_path = filename
+            elif variable == "datasheets":
+                self.datasheets = filename
+                print(self.datasheets)
+            else:
+                # Check if it's a data type path
+                for data_type in self.get_all_data_types():
+                    config = self.get_data_type_config(data_type)
+                    path_key = config.get('path_key', f'{data_type}_path')
+                    if variable == path_key:
+                        setattr(self, path_key, filename)
+                        print(f"Set {path_key} to {filename}")
+                        break
+
+    def open_file(self, entry):
+        """Open the file specified in the entry using the system default application"""
+        file_path = entry.get().strip()
+        if not file_path:
+            messagebox.showwarning("No File", "Please specify a file path first.")
+            return
+        
+        if not os.path.exists(file_path):
+            messagebox.showerror("File Not Found", f"The file '{file_path}' does not exist.")
+            return
+        
+        try:
+            os.startfile(file_path)
+        except Exception as e:
+            messagebox.showerror("Error Opening File", f"Could not open file: {str(e)}")
 
     def configure(self, text):
         print(f"Configure {text}")
 
-        if text == 'Instrument Index':
-            file_path = self.tag_data_path
-            current_headers = self.td_headers
-            current_selection = self.td_selected_sheets
-            current_tolerance = self.blank_cell_tolerance
-
-            if not file_path or not os.path.exists(file_path):
-                messagebox.showwarning("File Not Found", "Please select a valid Instrument Index file first.", parent=self.root)
-                return
-
-            result = configure_source_data_dialog(self.root, "Configure Instrument Index Source",
-                                                  current_headers, file_path, current_selection, current_tolerance)
-
-            if result:
-                self.td_headers = result["headers"]
-                self.td_selected_sheets = result["selected_sheets"]
-                self.blank_cell_tolerance = result["tolerance"]
-                print("Instrument Index configuration updated.")
-                # Optionally regenerate data immediately or prompt user
-                # self.generate_tag_data() # Example: Regenerate
-
-        elif text == 'Process Conditions':
-            file_path = self.process_conditions_path
-            current_headers = self.pc_headers
-            current_selection = self.pc_selected_sheets
-            current_tolerance = self.blank_cell_tolerance # Use the same tolerance setting for now
-
-            if not file_path or not os.path.exists(file_path):
-                messagebox.showwarning("File Not Found", "Please select a valid Process Conditions file first.", parent=self.root)
-                return
-
-            # Reuse the same dialog function
-            result = configure_source_data_dialog(self.root, "Configure Process Conditions Source",
-                                                  current_headers, file_path, current_selection, current_tolerance)
-
-            if result:
-                self.pc_headers = result["headers"]
-                self.pc_selected_sheets = result["selected_sheets"]
-                self.blank_cell_tolerance = result["tolerance"] # Update tolerance based on this config too
-                print("Process Conditions configuration updated.")
-                # Optionally regenerate data immediately or prompt user
-                # self.generate_process_conditions() # Example: Regenerate
-
-        elif text == 'Datasheets':
+        if text == 'Datasheets':
              self.configure_ds() # Keep existing Datasheet config separate
         else:
-             print(f"Unknown configuration type: {text}")
+            # Find the data type by name
+            data_type = self.get_data_type_by_name(text)
+            if data_type:
+                self.configure_data_type(data_type)
+            else:
+                print(f"Unknown configuration type: {text}")
+    
+    def get_data_type_by_name(self, name):
+        """Get data type key by its display name"""
+        for data_type, config in self.data_types.items():
+            if config.get('name') == name:
+                return data_type
+        return None
+    
+    def configure_data_type(self, data_type):
+        """Configure a specific data type using the centralized system"""
+        config = self.get_data_type_config(data_type)
+        name = config.get('name', data_type.upper())
+        path_key = config.get('path_key', f'{data_type}_path')
+        
+        file_path = getattr(self, path_key, '')
+        current_headers = self.get_data_type_headers(data_type)
+        current_selection = self.get_data_type_selected_sheets(data_type)
+        current_tolerance = self.blank_cell_tolerance
+
+        if not file_path or not os.path.exists(file_path):
+            messagebox.showwarning("File Not Found", f"Please select a valid {name} file first.", parent=self.root)
+            return
+
+        result = configure_source_data_dialog(self.root, f"Configure {name} Source",
+                                              current_headers, file_path, current_selection, current_tolerance)
+
+        if result:
+            self.set_data_type_headers(data_type, result["headers"])
+            self.set_data_type_selected_sheets(data_type, result["selected_sheets"])
+            self.blank_cell_tolerance = result["tolerance"]
+            print(f"{name} configuration updated.")
 
     def update_pc_keys(self):
         code = askstring("Enter transformation code for keys in dictionary", "Enter transformation code",
@@ -1532,11 +2315,6 @@ class DatasheetGeneratorApp:
                 self.excel_mgr.wb.sheets[sheet_name].delete()
             self.excel_mgr.mark_as_modified()
             print(f"Deleted {len(sheets_to_delete)} sheets")
-
-    def configure_ds(self):
-        self.init_excel()
-        self.refresh_tab_content()
-        self.update_entries()
 
     # endregion
 
@@ -1960,8 +2738,563 @@ class DatasheetGeneratorApp:
         regex_window = tk.Toplevel(self.root)
         ExcelRegexSearchApp(regex_window)
 
+    # Semantic similarity methods
+    def load_semantic_model_async(self):
+        """Load the sentence transformer model in a background thread"""
+        def load_model():
+            try:
+                self.loading_model = True
+                # Use a lightweight model for faster loading
+                self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
+                self.model_loaded = True
+                self.loading_model = False
+                
+                # Update UI in main thread
+                self.root.after(0, self.on_semantic_model_loaded)
+            except Exception as e:
+                self.loading_model = False
+                self.root.after(0, lambda: self.on_semantic_model_error(str(e)))
+        
+        thread = threading.Thread(target=load_model, daemon=True)
+        thread.start()
+    
+    def on_semantic_model_loaded(self):
+        """Called when semantic model is successfully loaded"""
+        print("Semantic model loaded successfully!")
+        # Update status label if it exists
+        if hasattr(self, 'semantic_status_label'):
+            self.semantic_status_label.config(text="Semantic model: Ready", foreground="green")
+    
+    def on_semantic_model_error(self, error_msg):
+        """Called when semantic model loading fails"""
+        print(f"Error loading semantic model: {error_msg}")
+        messagebox.showerror("Error", f"Failed to load semantic model: {error_msg}")
+    
+    def get_min_score_threshold(self):
+        """Ask user for minimum score threshold for blind automap"""
+        from tkinter import simpledialog
+        
+        # Ask user for minimum score (default 0.3)
+        result = simpledialog.askfloat(
+            "Blind AutoMap Settings",
+            "Enter minimum similarity score (0.0 - 1.0):\n\n" +
+            "• 0.1-0.3: Very permissive (more matches, less accurate)\n" +
+            "• 0.4-0.6: Balanced (recommended)\n" +
+            "• 0.7-0.9: Very strict (fewer matches, more accurate)",
+            initialvalue=0.5,
+            minvalue=0.0,
+            maxvalue=1.0
+        )
+        
+        return result
+    
+    def compute_semantic_similarity(self, text1: str, text2: str) -> float:
+        """Compute cosine similarity between two texts"""
+        if not self.model_loaded or not self.semantic_model:
+            return 0.0
+        
+        try:
+            # Encode the texts
+            embeddings = self.semantic_model.encode([text1, text2])
+            
+            # Calculate cosine similarity
+            similarity = np.dot(embeddings[0], embeddings[1]) / (
+                np.linalg.norm(embeddings[0]) * np.linalg.norm(embeddings[1])
+            )
+            
+            return float(similarity)
+        except Exception as e:
+            print(f"Error computing semantic similarity: {e}")
+            return 0.0
+    
+    def get_cell_values_above_and_left(self, sheet, current_cell):
+        """Get the values of the next non-empty cells above and to the left of the current cell"""
+        try:
+            # Parse current cell coordinate
+            import re
+            match = re.match(r'([A-Z]+)(\d+)', current_cell)
+            if not match:
+                return None, None
+            
+            col_letter, row_num = match.groups()
+            col_num = 0
+            for char in col_letter:
+                col_num = col_num * 26 + (ord(char) - ord('A') + 1)
+            row_num = int(row_num)
+            
+            above_value = None
+            left_value = None
+            
+            # Get value from cells above (skip blank cells)
+            if row_num > 1:
+                for r in range(row_num - 1, 0, -1):  # Go up from current row
+                    above_cell = f"{col_letter}{r}"
+                    cell_value = sheet.range(above_cell).value
+                    if cell_value and str(cell_value).strip():
+                        above_value = str(cell_value).strip()
+                        break
+            
+            # Get value from cells to the left (skip blank cells)
+            if col_num > 1:
+                for c in range(col_num - 1, 0, -1):  # Go left from current column
+                    left_col = ""
+                    temp_col = c
+                    while temp_col > 0:
+                        temp_col -= 1
+                        left_col = chr(ord('A') + (temp_col % 26)) + left_col
+                        temp_col //= 26
+                    
+                    left_cell = f"{left_col}{row_num}"
+                    cell_value = sheet.range(left_cell).value
+                    if cell_value and str(cell_value).strip():
+                        left_value = str(cell_value).strip()
+                        break
+            
+            return above_value, left_value
+        except Exception as e:
+            print(f"Error getting cell values above/left: {e}")
+            return None, None
+    
+    def auto_map_coordinate_semantic(self, data_type, current_coord):
+        """Automatically map a coordinate using semantic similarity"""
+        print(f"DEBUG: auto_map_coordinate_semantic called with data_type='{data_type}'")
+        
+        if not self.model_loaded:
+            messagebox.showwarning("Warning", "Semantic model is still loading. Please wait.")
+            return None
+        
+        try:
+            # Get the current sheet
+            if not hasattr(self, 'excel_mgr') or not self.excel_mgr.wb:
+                messagebox.showerror("Error", "No Excel workbook open")
+                return None
+            
+            # Get the active sheet
+            sheet = self.excel_mgr.wb.sheets.active
+            
+            # Get the cell values above and to the left
+            above_value, left_value = self.get_cell_values_above_and_left(sheet, current_coord)
+            if not above_value and not left_value:
+                messagebox.showinfo("Info", "No text found above or to the left of the selected cell")
+                return None
+            
+            # Get the combo values for this data type (these are what appear in the dropdown)
+            combo_values = []
+            for dt in self.get_all_data_types():
+                if dt == data_type:
+                    data = self.get_data_type_data(dt)
+                    for key, value in data.items():
+                        if isinstance(value, dict):
+                            combo_values = list(value.keys())
+                            break
+                    break
+            
+            if not combo_values:
+                config = self.get_data_type_config(data_type)
+                name = config.get('name', data_type.upper())
+                messagebox.showwarning("Warning", f"No {name} data available. Please load {name} data first using the 'Load {name} from Datasheet' or 'Load {name} from JSON' buttons.")
+                return None
+            
+            # Calculate similarity scores for both above and left values
+            best_match = None
+            best_score = -1
+            source_direction = ""
+            
+            # Check similarity for above value
+            if above_value:
+                for combo_value in combo_values:
+                    score = self.compute_semantic_similarity(above_value, combo_value)
+                    if score > best_score:
+                        best_score = score
+                        best_match = combo_value
+                        source_direction = "above"
+            
+            # Check similarity for left value
+            if left_value:
+                for combo_value in combo_values:
+                    score = self.compute_semantic_similarity(left_value, combo_value)
+                    if score > best_score:
+                        best_score = score
+                        best_match = combo_value
+                        source_direction = "left"
+            
+            # Show results to user
+            if best_match and best_score > 0.3:  # Threshold for acceptable similarity
+                source_text = above_value if source_direction == "above" else left_value
+                result = messagebox.askyesno(
+                    "Semantic Mapping Found", 
+                    f"Found potential match:\n\n"
+                    f"Text from {source_direction}: '{source_text}'\n"
+                    f"Best match: '{best_match}'\n"
+                    f"Similarity score: {best_score:.3f}\n\n"
+                    f"Use this mapping?"
+                )
+                
+                if result:
+                    return best_match
+                else:
+                    return None
+            else:
+                text_info = []
+                if above_value:
+                    text_info.append(f"Above: '{above_value}'")
+                if left_value:
+                    text_info.append(f"Left: '{left_value}'")
+                
+                messagebox.showinfo(
+                    "No Good Match Found",
+                    f"No good semantic match found for:\n"
+                    f"{' and '.join(text_info)}\n\n"
+                    f"Best score was: {best_score:.3f}"
+                )
+                return None
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error in semantic mapping: {str(e)}")
+            return None
+
+    def auto_map_coordinate_semantic_silent(self, data_type, current_coord, min_score=0.3):
+        """Silent version of semantic mapping without user feedback dialogs"""
+        try:
+            # Get cell values above and left using the existing method
+            sheet = xw.apps.active.books.active.sheets.active
+            above_value, left_value = self.get_cell_values_above_and_left(sheet, current_coord)
+            
+            # Get available options for this data type
+            data = self.get_data_type_data(data_type)
+            if not data:
+                return None, 0.0
+            
+            # Get the options (keys from the first value dict)
+            options = []
+            for key, value in data.items():
+                options = list(value.keys())
+                break
+            
+            if not options:
+                return None, 0.0
+            
+            # Prepare text for semantic comparison
+            text_options = []
+            if above_value and str(above_value).strip():
+                text_options.append(str(above_value).strip())
+            if left_value and str(left_value).strip():
+                text_options.append(str(left_value).strip())
+            
+            if not text_options:
+                return None, 0.0
+            
+            # Encode options and text for comparison
+            option_embeddings = self.semantic_model.encode(options)
+            
+            best_match = None
+            best_score = 0
+            
+            for text in text_options:
+                text_embedding = self.semantic_model.encode([text])
+                similarities = np.dot(text_embedding, option_embeddings.T).flatten()
+                
+                max_idx = np.argmax(similarities)
+                score = similarities[max_idx]
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = options[max_idx]
+            
+            # Return best match and score
+            if best_match and best_score > min_score:
+                return best_match, best_score
+            else:
+                return None, best_score
+                
+        except Exception as e:
+            print(f"Error in silent semantic mapping: {e}")
+            return None, 0.0
+
+    def blind_automap_range(self, data_type, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
+        """Iterate through a range of cells and perform silent semantic mapping"""
+        try:
+            # Parse the range
+            clean_selection = full_selection.replace('$', '')
+            start_cell, end_cell = clean_selection.split(':')
+            
+            # Get the sheet
+            sheet = xw.apps.active.books.active.sheets.active
+            
+            # Get the range object
+            range_obj = sheet.range(f"{start_cell}:{end_cell}")
+            
+            # Handle merged cells and iterate through unique cells
+            processed_cells = set()
+            successful_mappings = 0
+            mapping_results = []  # Track all mapping results with scores
+            
+            # Get the dimensions of the range
+            rows = range_obj.shape[0]
+            cols = range_obj.shape[1]
+            
+            # Iterate through each cell in the range
+            for row in range(rows):
+                for col in range(cols):
+                    # Get the current cell
+                    cell = range_obj.offset(row, col).resize(1, 1)
+                    cell_address = cell.address.replace('$', '')
+                    
+                    # Skip if we've already processed this cell (due to merged cells)
+                    if cell_address in processed_cells:
+                        continue
+                    
+                    # Check if this cell is part of a merged range
+                    merged_range = None
+                    try:
+                        for merged in sheet.api.MergedCells:
+                            if cell.api.Address in merged.Address:
+                                # This cell is part of a merged range
+                                merged_range = merged.Address.replace('$', '')
+                                # Add all cells in the merged range to processed set
+                                merge_start, merge_end = merged_range.split(':')
+                                merge_range_obj = sheet.range(f"{merge_start}:{merge_end}")
+                                # Use shape to iterate through merged range
+                                merge_rows = merge_range_obj.shape[0]
+                                merge_cols = merge_range_obj.shape[1]
+                                for mr in range(merge_rows):
+                                    for mc in range(merge_cols):
+                                        merge_cell = merge_range_obj.offset(mr, mc).resize(1, 1)
+                                        processed_cells.add(merge_cell.address.replace('$', ''))
+                                break
+                    except:
+                        # If merged cells check fails, continue normally
+                        pass
+                
+                    # Use the top-left cell of merged range or the single cell
+                    target_cell = merged_range.split(':')[0] if merged_range else cell_address
+                    
+                    # Skip empty cells
+                    cell_value = sheet.range(target_cell).value
+                    if not cell_value or not str(cell_value).strip():
+                        processed_cells.add(cell_address)
+                        continue
+                    
+                    # Perform silent semantic mapping for this cell
+                    best_match, score = self.auto_map_coordinate_semantic_silent(data_type, target_cell, min_score)
+                    
+                    # Record the result
+                    if best_match:
+                        # Add the mapping silently
+                        coordinate_values = self.get_data_type_coordinate_values(data_type)
+                        coordinate_values[target_cell] = best_match
+                        self.set_data_type_coordinate_values(data_type, coordinate_values)
+                        successful_mappings += 1
+                        mapping_results.append(f"✓ {target_cell} → {best_match} (score: {score:.3f})")
+                    else:
+                        mapping_results.append(f"✗ {target_cell} → No match (score: {score:.3f})")
+                    
+                    processed_cells.add(cell_address)
+            
+            # Update the listbox to show all new mappings
+            if hasattr(self, f"{data_type}_listbox"):
+                listbox_obj = getattr(self, f"{data_type}_listbox")
+                self.update_single_listbox(data_type, listbox_obj)
+            
+            # Show results summary
+            summary = f"Blind AutoMap Range Results:\n\n"
+            summary += f"Range: {clean_selection}\n"
+            summary += f"Successful mappings: {successful_mappings}\n"
+            summary += f"Total cells processed: {len(mapping_results)}\n"
+            summary += f"Minimum score threshold: {min_score}\n\n"
+            
+            if mapping_results:
+                summary += "Detailed Results:\n" + "\n".join(mapping_results[:10])  # Show first 10
+                if len(mapping_results) > 10:
+                    summary += f"\n... and {len(mapping_results) - 10} more results"
+            
+            messagebox.showinfo("Blind AutoMap Results", summary)
+            print(f"Blind AutoMap completed: {successful_mappings} successful mappings")
+            
+        except Exception as e:
+            print(f"Error in blind automap range: {e}")
+
+    def blind_automap_noncontiguous(self, data_type, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
+        """Process non-contiguous selections (multiple ranges separated by commas)"""
+        try:
+            # Parse the non-contiguous selection
+            clean_selection = full_selection.replace('$', '')
+            ranges = clean_selection.split(',')
+            
+            total_successful_mappings = 0
+            all_mapping_results = []
+            
+            print(f"Processing {len(ranges)} non-contiguous ranges...")
+            
+            for i, range_addr in enumerate(ranges):
+                range_addr = range_addr.strip()
+                print(f"Processing range {i+1}/{len(ranges)}: {range_addr}")
+                
+                if ':' in range_addr:
+                    # This is a range (e.g., A1:B5)
+                    successful_mappings, mapping_results = self.process_single_range_for_automap(data_type, range_addr, min_score)
+                else:
+                    # This is a single cell (e.g., C3)
+                    successful_mappings, mapping_results = self.process_single_cell_for_automap(data_type, range_addr, min_score)
+                
+                total_successful_mappings += successful_mappings
+                all_mapping_results.extend(mapping_results)
+                print(f"Range {i+1} completed: {successful_mappings} mappings")
+            
+            # Update the listbox to show all new mappings
+            if hasattr(self, f"{data_type}_listbox"):
+                listbox_obj = getattr(self, f"{data_type}_listbox")
+                self.update_single_listbox(data_type, listbox_obj)
+            
+            # Show results summary
+            summary = f"Blind AutoMap Non-Contiguous Results:\n\n"
+            summary += f"Selection: {clean_selection}\n"
+            summary += f"Ranges processed: {len(ranges)}\n"
+            summary += f"Successful mappings: {total_successful_mappings}\n"
+            summary += f"Total cells processed: {len(all_mapping_results)}\n"
+            summary += f"Minimum score threshold: {min_score}\n\n"
+            
+            if all_mapping_results:
+                summary += "Detailed Results:\n" + "\n".join(all_mapping_results[:15])  # Show first 15
+                if len(all_mapping_results) > 15:
+                    summary += f"\n... and {len(all_mapping_results) - 15} more results"
+            
+            messagebox.showinfo("Blind AutoMap Results", summary)
+            print(f"Non-contiguous Blind AutoMap completed: {total_successful_mappings} total successful mappings")
+            
+        except Exception as e:
+            print(f"Error in blind automap non-contiguous: {e}")
+
+    def process_single_range_for_automap(self, data_type, range_addr, min_score=0.3):
+        """Process a single range for automap (helper for non-contiguous processing)"""
+        try:
+            # Get the sheet
+            sheet = xw.apps.active.books.active.sheets.active
+            
+            # Get the range object
+            range_obj = sheet.range(range_addr)
+            
+            # Handle merged cells and iterate through unique cells
+            processed_cells = set()
+            successful_mappings = 0
+            mapping_results = []
+            
+            # Get the dimensions of the range
+            rows = range_obj.shape[0]
+            cols = range_obj.shape[1]
+            
+            # Iterate through each cell in the range
+            for row in range(rows):
+                for col in range(cols):
+                    # Get the current cell
+                    cell = range_obj.offset(row, col).resize(1, 1)
+                    cell_address = cell.address.replace('$', '')
+                    
+                    # Skip if we've already processed this cell (due to merged cells)
+                    if cell_address in processed_cells:
+                        continue
+                    
+                    # Check if this cell is part of a merged range
+                    merged_range = None
+                    try:
+                        for merged in sheet.api.MergedCells:
+                            if cell.api.Address in merged.Address:
+                                # This cell is part of a merged range
+                                merged_range = merged.Address.replace('$', '')
+                                # Add all cells in the merged range to processed set
+                                merge_start, merge_end = merged_range.split(':')
+                                merge_range_obj = sheet.range(f"{merge_start}:{merge_end}")
+                                # Use shape to iterate through merged range
+                                merge_rows = merge_range_obj.shape[0]
+                                merge_cols = merge_range_obj.shape[1]
+                                for mr in range(merge_rows):
+                                    for mc in range(merge_cols):
+                                        merge_cell = merge_range_obj.offset(mr, mc).resize(1, 1)
+                                        processed_cells.add(merge_cell.address.replace('$', ''))
+                                break
+                    except:
+                        # If merged cells check fails, continue normally
+                        pass
+                
+                    # Use the top-left cell of merged range or the single cell
+                    target_cell = merged_range.split(':')[0] if merged_range else cell_address
+                    
+                    # Skip empty cells
+                    cell_value = sheet.range(target_cell).value
+                    if not cell_value or not str(cell_value).strip():
+                        processed_cells.add(cell_address)
+                        continue
+                    
+                    # Perform silent semantic mapping for this cell
+                    best_match, score = self.auto_map_coordinate_semantic_silent(data_type, target_cell, min_score)
+                    
+                    # Record the result
+                    if best_match:
+                        # Add the mapping silently
+                        coordinate_values = self.get_data_type_coordinate_values(data_type)
+                        coordinate_values[target_cell] = best_match
+                        self.set_data_type_coordinate_values(data_type, coordinate_values)
+                        successful_mappings += 1
+                        mapping_results.append(f"✓ {target_cell} → {best_match} (score: {score:.3f})")
+                    else:
+                        mapping_results.append(f"✗ {target_cell} → No match (score: {score:.3f})")
+                    
+                    processed_cells.add(cell_address)
+            
+            return successful_mappings, mapping_results
+            
+        except Exception as e:
+            print(f"Error processing range {range_addr}: {e}")
+            return 0, []
+
+    def process_single_cell_for_automap(self, data_type, cell_addr, min_score=0.3):
+        """Process a single cell for automap (helper for non-contiguous processing)"""
+        try:
+            # Get the sheet
+            sheet = xw.apps.active.books.active.sheets.active
+            
+            # Skip empty cells
+            cell_value = sheet.range(cell_addr).value
+            if not cell_value or not str(cell_value).strip():
+                return 0, []
+            
+            # Perform silent semantic mapping for this cell
+            best_match, score = self.auto_map_coordinate_semantic_silent(data_type, cell_addr, min_score)
+            
+            if best_match:
+                # Add the mapping silently
+                coordinate_values = self.get_data_type_coordinate_values(data_type)
+                coordinate_values[cell_addr] = best_match
+                self.set_data_type_coordinate_values(data_type, coordinate_values)
+                return 1, [f"✓ {cell_addr} → {best_match} (score: {score:.3f})"]
+            else:
+                return 0, [f"✗ {cell_addr} → No match (score: {score:.3f})"]
+            
+        except Exception as e:
+            print(f"Error processing cell {cell_addr}: {e}")
+            return 0, []
+
+    def update_single_listbox(self, data_type, listbox):
+        """Update a single listbox for a specific data type"""
+        listbox.delete(0, tk.END)
+        coordinate_values = self.get_data_type_coordinate_values(data_type)
+        for key, value in coordinate_values.items():
+            coord_display = f"{key}: {value}"
+            if key in self.coordinate_conversions:
+                conv = self.coordinate_conversions[key]
+                coord_display += f" [{conv.get('in_unit', '?')}->{conv.get('out_unit', '?')}]"
+            if key in self.coordinate_combinations:
+                combo = self.coordinate_combinations[key]
+                coord_display += f" [Combines: {', '.join(combo.get('combines', []))} ({combo.get('operation', 'add')})]"
+            listbox.insert(tk.END, coord_display)
+
 
 if __name__ == "__main__":
+    print("DEBUG: Starting main execution...")
+    print("DEBUG: Creating tkinter root window...")
     root = tk.Tk()
+    print("DEBUG: Creating DatasheetGeneratorApp instance...")
     app = DatasheetGeneratorApp(root)
+    print("DEBUG: Starting main event loop...")
     root.mainloop()
+    print("DEBUG: Main event loop ended.")

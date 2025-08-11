@@ -484,11 +484,14 @@ def update_cell_xlwings(sheet, cell_address, value):
 
 def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
                    rows_per_sheet=1, custom_sort=None, key_coordinate='I12',
-                   sig_figs=4, tolerance=1e-2):
+                   sig_figs=4, tolerance=1e-2, halt_callback=None):
     """
     Manages Excel sheets by adding or updating data based on tags.
     
     Updates existing tags first, then creates new sheets for additional tags if a source sheet is provided.
+    
+    Args:
+        halt_callback: Optional function that returns True if the process should be halted
     """
     # Determine if we can create new sheets
     can_create_new_sheets = False
@@ -522,6 +525,11 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
     added_sheets = set()
     # Process existing tags first
     for tag in sorted_keys:
+        # Check if process should be halted
+        if halt_callback and halt_callback():
+            print("Process halted by user")
+            return list(added_sheets)
+            
         if tag in existing_tags:
             # Update values for existing tag
             print(f'Updating existing tag {tag}')
@@ -553,6 +561,11 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
         print(f"remaining tags length: {len(remaining_tags)}")
 
         for tag in remaining_tags:
+            # Check if process should be halted
+            if halt_callback and halt_callback():
+                print("Process halted by user")
+                return list(added_sheets)
+                
             print(f'Adding new tag {tag}')
             datasheet_no = get_unique_sheet_name(datasheet, ds_prefix, (count // rows_per_sheet) + 1)
             print(f'Datasheet number: {datasheet_no}, count: {count}, rows per sheet: {rows_per_sheet}')
