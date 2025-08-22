@@ -1,0 +1,106 @@
+Sub CopyValueToCVSheets()
+    Dim sourceValue As Variant
+    Dim ws As Worksheet
+    Dim prefix As String
+    prefix = InputBox("Enter a prefix to search for sheets:", "Prefix")
+
+    ' Get the value from the currently selected cell
+    sourceValue = Selection.Value
+    
+    ' Loop through each sheet in the workbook
+    For Each ws In ThisWorkbook.Sheets
+        ' Check if the sheet name starts with "CV"
+        If Left(ws.Name, len(prefix)) = prefix Then
+            ' Paste the value into the corresponding cell in the "CV" sheet
+            ws.Range(Selection.Address).Value = sourceValue
+        End If
+    Next ws
+End Sub
+
+Sub CopyFormulaToCVSheets()
+    Dim sourceRange As Range
+    Dim ws As Worksheet
+    Dim prefix As String
+    prefix = InputBox("Enter a prefix to search for sheets:", "Prefix")
+    ' Get the selected range
+    Set sourceRange = Selection
+
+    ' Loop through each sheet in the workbook
+    For Each ws In ThisWorkbook.Sheets
+        ' Check if the sheet name starts with "DS"
+        If Left(ws.Name, len(prefix)) = prefix Then
+            ' Paste the formula into the corresponding range in the "CV" sheet
+            ws.Range(sourceRange.Address).Formula = sourceRange.Formula
+        End If
+    Next ws
+End Sub
+
+Sub AppendSuffixToSheets()
+    Dim ws As Worksheet
+    Dim prefix As String
+    Dim suffix As String
+    Dim cell As Range
+    
+    ' Get the prefix to search for sheets
+    prefix = InputBox("Enter a prefix to search for sheets:", "Prefix")
+    
+    ' Get the suffix to append
+    suffix = InputBox("Enter the suffix to append:", "Suffix")
+    
+    ' Check if a range is selected
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Please select a range first.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Loop through each sheet in the workbook
+    For Each ws In ThisWorkbook.Sheets
+        ' Check sheet name prefix
+        If Left(ws.Name, Len(prefix)) = prefix Then
+            ' Loop through each cell in the selected range
+            For Each cell In Selection
+                ' Append the suffix to the cell value
+                If Not IsEmpty(ws.Range(cell.Address).Value) Then
+                    ws.Range(cell.Address).Value = ws.Range(cell.Address).Value & suffix
+                End If
+            Next cell
+        End If
+    Next ws
+    
+    MsgBox "Suffix appended successfully!", vbInformation
+End Sub
+
+Sub AppendPrefixToSheets()
+    Dim ws As Worksheet
+    Dim sheetPrefix As String
+    Dim cellPrefix As String
+    Dim cell As Range
+    
+    ' Get the prefix to search for sheets
+    sheetPrefix = InputBox("Enter a prefix to search for sheets:", "Sheet Prefix")
+    
+    ' Get the prefix to append to cells
+    cellPrefix = InputBox("Enter the prefix to append to cell values:", "Cell Prefix")
+    
+    ' Check if a range is selected
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Please select a range first.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Loop through each sheet in the workbook
+    For Each ws In ThisWorkbook.Sheets
+        ' Check sheet name prefix
+        If Left(ws.Name, Len(sheetPrefix)) = sheetPrefix Then
+            ' Loop through each cell in the selected range
+            For Each cell In Selection
+                ' Append the prefix to the cell value
+                If Not IsEmpty(ws.Range(cell.Address).Value) Then
+                    ws.Range(cell.Address).Value = cellPrefix & ws.Range(cell.Address).Value
+                End If
+            Next cell
+        End If
+    Next ws
+    
+    MsgBox "Prefix appended successfully!", vbInformation
+End Sub
