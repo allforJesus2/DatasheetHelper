@@ -48,6 +48,9 @@ from excel_macro_viewer import ExcelMacroViewer # Add this import
 print("DEBUG: Importing excel_regex_search...")
 from excel_regex_search import ExcelRegexSearchApp
 
+print("DEBUG: Importing semantic_matcher...")
+from semantic_matcher import SemanticMatcherApp
+
 print("DEBUG: Importing threading...")
 import threading
 
@@ -549,6 +552,7 @@ class DatasheetGeneratorApp:
             ("Delete Certain Sheets by Prefix", self.delete_sheets_by_prefix),
             ("Excel Macros", self.open_excel_macros_window),
             ("Excel Regex Search App", self.open_excel_regex_search_app),
+            ("Semantic Matcher", self.open_semantic_matcher),
             ("Stop Datasheet Generation", self.set_halt_flag)
         ]
         
@@ -696,9 +700,6 @@ class DatasheetGeneratorApp:
                 coordinate_values[coord] = value
                 self.set_data_type_coordinate_values(data_type, coordinate_values)
                 
-                # Set top tag for TD if it's the first coordinate
-                if data_type == "td" and not coordinate_values:
-                    self.top_tag = coord
                 update_listboxes()
 
         def remove_coordinate(data_type, listbox):
@@ -786,14 +787,6 @@ class DatasheetGeneratorApp:
                     combo = self.coordinate_combinations[key]
                     coord_display += f" [Combines: {', '.join(combo.get('combines', []))} ({combo.get('operation', 'add')})]"
                 listbox.insert(tk.END, coord_display)
-            
-            # Set top tag for TD if it's the first coordinate
-            if data_type == "td" and coordinate_values:
-                try:
-                    first_entry = listbox.get(0)
-                    self.top_tag = first_entry.split(':')[0]
-                except:
-                    print('failed to set top_tag')
 
         def update_listboxes():
             """Update all listboxes for all data types"""
@@ -821,7 +814,7 @@ class DatasheetGeneratorApp:
         top_frame = ttk.Frame(tab)
         top_frame.pack(fill="x", padx=10, pady=5)
 
-        coord_label = ttk.Label(top_frame, text="Enter Key Coordinate:\n(First entry is top tag default)")
+        coord_label = ttk.Label(top_frame, text=f"Enter Key Coordinate:\n(Current top tag: {getattr(self, 'top_tag', 'A1')})")
         coord_label.pack(side="left")
 
         entry_var = tk.StringVar()
@@ -1041,6 +1034,68 @@ class DatasheetGeneratorApp:
 
         update_listboxes()
         tab.after(200, update_entry)
+
+        # Save/Load coordinate maps functionality
+        def save_coordinate_maps():
+            """Save all coordinate maps to a JSON file"""
+            try:
+                file_path = filedialog.asksaveasfilename(
+                    title="Save Coordinate Maps",
+                    defaultextension=".json",
+                    filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+                )
+                if file_path:
+                    coordinate_data = {}
+                    for data_type in self.get_all_data_types():
+                        coordinate_data[data_type] = self.get_data_type_coordinate_values(data_type)
+                    
+                    # Also save coordinate conversions and combinations
+                    coordinate_data['conversions'] = self.coordinate_conversions
+                    coordinate_data['combinations'] = self.coordinate_combinations
+                    
+                    with open(file_path, 'w') as f:
+                        json.dump(coordinate_data, f, indent=2)
+                    
+                    messagebox.showinfo("Success", f"Coordinate maps saved to {file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save coordinate maps: {e}")
+        
+        def load_coordinate_maps():
+            """Load coordinate maps from a JSON file"""
+            try:
+                file_path = filedialog.askopenfilename(
+                    title="Load Coordinate Maps",
+                    filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+                )
+                if file_path:
+                    with open(file_path, 'r') as f:
+                        coordinate_data = json.load(f)
+                    
+                    # Load coordinate values for each data type
+                    for data_type in self.get_all_data_types():
+                        if data_type in coordinate_data:
+                            self.set_data_type_coordinate_values(data_type, coordinate_data[data_type])
+                    
+                    # Load coordinate conversions and combinations
+                    if 'conversions' in coordinate_data:
+                        self.coordinate_conversions = coordinate_data['conversions']
+                    if 'combinations' in coordinate_data:
+                        self.coordinate_combinations = coordinate_data['combinations']
+                    
+                    # Update the UI
+                    update_listboxes()
+                    messagebox.showinfo("Success", f"Coordinate maps loaded from {file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load coordinate maps: {e}")
+        
+        # Add Save/Load buttons to the coordinates tab
+        save_load_frame = ttk.Frame(tab)
+        save_load_frame.pack(fill="x", padx=10, pady=5)
+        
+        ttk.Button(save_load_frame, text="Save Coordinate Maps", 
+                   command=save_coordinate_maps).pack(side="left", padx=5)
+        ttk.Button(save_load_frame, text="Load Coordinate Maps", 
+                   command=load_coordinate_maps).pack(side="left", padx=5)
 
         # Expose reinitialize method for external calls
         tab.reinitialize = reinitialize
@@ -1773,6 +1828,12 @@ IMPORTANT NOTES:
         self.reset_halt_flag()
         self.is_processing = True
         
+        # Enable stop button and disable generate button
+        if hasattr(self, 'stop_button'):
+            self.stop_button.config(state="normal")
+        if hasattr(self, 'generate_button'):
+            self.generate_button.config(state="disabled")
+        
         try:
             # Force reinitialization of Excel connection
             self.init_excel()
@@ -1820,6 +1881,12 @@ IMPORTANT NOTES:
             self.excel_mgr.app = None
         finally:
             self.is_processing = False
+            
+            # Disable stop button and enable generate button
+            if hasattr(self, 'stop_button'):
+                self.stop_button.config(state="disabled")
+            if hasattr(self, 'generate_button'):
+                self.generate_button.config(state="normal")
 
     # endregion
 
@@ -2737,6 +2804,11 @@ IMPORTANT NOTES:
         """Opens the Excel Regex Search window."""
         regex_window = tk.Toplevel(self.root)
         ExcelRegexSearchApp(regex_window)
+    
+    def open_semantic_matcher(self):
+        """Opens the Semantic Matcher window."""
+        semantic_window = tk.Toplevel(self.root)
+        SemanticMatcherApp(semantic_window, self)
 
     # Semantic similarity methods
     def load_semantic_model_async(self):
