@@ -48,8 +48,7 @@ from excel_macro_viewer import ExcelMacroViewer # Add this import
 print("DEBUG: Importing excel_regex_search...")
 from excel_regex_search import ExcelRegexSearchApp
 
-print("DEBUG: Importing semantic_matcher...")
-from semantic_matcher import SemanticMatcherApp
+# Semantic matcher will be imported lazily when needed
 
 print("DEBUG: Importing threading...")
 import threading
@@ -288,16 +287,25 @@ class DatasheetGeneratorApp:
             'coordinate_combinations': {} # Stores coordinate combinations (e.g., {'A1': {'combines': ['B1', 'C1'], 'operation': 'add'}})
         }
         
-        # Add data type paths dynamically
-        print("DEBUG: Adding data type paths...")
+        # Add data type paths and attributes dynamically
+        print("DEBUG: Adding data type paths and attributes...")
         for data_type, config in self.data_types.items():
             path_key = config.get('path_key', f'{data_type}_path')
             self.parameters[path_key] = ''
+            # Add data type dictionaries and coordinate values to parameters
+            self.parameters[data_type] = {}
+            self.parameters[f'{data_type}_coordinate_values'] = {}
+            self.parameters[f'{data_type}_selected_sheets'] = None
+            self.parameters[f'{data_type}_headers'] = config['default_headers']
 
         # Initialize all parameters in the __init__ method
         print("DEBUG: Setting parameter attributes...")
         for param, value in self.parameters.items():
             setattr(self, param, value)
+        
+        # Initialize transform-related attributes
+        print("DEBUG: Setting transform attributes...")
+        self.td_xkey = 'TAG NUMBER'  # Default TD key for transformation
 
         # Semantic similarity model
         print("DEBUG: Initializing semantic model attributes...")
@@ -387,6 +395,12 @@ class DatasheetGeneratorApp:
         if path_key not in self.parameters:
             self.parameters[path_key] = ''
             setattr(self, path_key, '')
+        
+        # Add data type attributes to parameters for settings saving/loading
+        self.parameters[data_type] = {}
+        self.parameters[f'{data_type}_coordinate_values'] = config.get('coordinate_values', {})
+        self.parameters[f'{data_type}_selected_sheets'] = config.get('selected_sheets', None)
+        self.parameters[f'{data_type}_headers'] = config.get('default_headers', [])
         
         # Refresh the GUI to include the new data type
         if hasattr(self, 'root') and self.root:
@@ -544,7 +558,6 @@ class DatasheetGeneratorApp:
             ("Load Settings", self.load_settings),
             ("Save Settings", self.save_settings),
             ("Run xlsx search app", self.open_excel_search_app),
-            ("Save and close", self.save_and_close_workbook),
             ("Populate Headers on Datasheets", self.open_edit_xlsx),
             ("View Coordinate Value Data", self.display_coordinate_values),
             ("Delete newly added datasheets", self.delete_added_sheets),
@@ -617,9 +630,6 @@ class DatasheetGeneratorApp:
                   command=lambda: self.browse(ds_entry, "datasheets")).pack(side=tk.LEFT, padx=2)
         tk.Button(ds_buttons, text="Configure",
                   command=lambda: self.configure("Datasheets")).pack(side=tk.LEFT, padx=2)
-        self.generate_button = tk.Button(ds_buttons, text="Generate",
-                  command=self.add_datasheets)
-        self.generate_button.pack(side=tk.LEFT, padx=2)
         
         self.stop_button = tk.Button(ds_buttons, text="Stop",
                   command=self.set_halt_flag, bg="red", fg="white", state="disabled")
@@ -627,6 +637,28 @@ class DatasheetGeneratorApp:
         
         tk.Button(ds_buttons, text="View",
                   command=lambda: self.view_data("Datasheets")).pack(side=tk.LEFT, padx=2)
+
+        # Color coding method dropdown
+        color_frame = tk.Frame(destination_container)
+        color_frame.pack(fill=tk.X, pady=5)
+
+        color_label = tk.Label(color_frame, text="Color Coding Method:", width=20)
+        color_label.pack(side=tk.LEFT, padx=5)
+
+        self.color_coding_var = tk.StringVar(value="new_red_old_green")
+        color_dropdown = ttk.Combobox(color_frame, textvariable=self.color_coding_var, 
+                                     values=["None (Black)", "new_red_old_green", "new_red"], 
+                                     state="readonly", width=20)
+        color_dropdown.pack(side=tk.LEFT, padx=5)
+
+        # Generate button centered below the entry
+        generate_frame = tk.Frame(destination_container)
+        generate_frame.pack(fill=tk.X, pady=5)
+
+        self.generate_button = tk.Button(generate_frame, text="Generate",
+                  command=self.add_datasheets, font=("Arial", 10, "bold"), 
+                  bg="green", fg="white", padx=20, pady=5)
+        self.generate_button.pack(expand=True)
 
         # Add status label
         self.status_label = tk.Label(destination_container, text="Ready", fg="black", font=("Arial", 9))
@@ -820,6 +852,13 @@ class DatasheetGeneratorApp:
         entry_var = tk.StringVar()
         coord_entry = ttk.Entry(top_frame, textvariable=entry_var)
         coord_entry.pack(side="left", fill="x", expand=True)
+        
+        # Min score entry for AutoMap
+        min_score_label = ttk.Label(top_frame, text="Min Score:")
+        min_score_label.pack(side="left", padx=(10, 2))
+        min_score_entry = ttk.Entry(top_frame, width=6)
+        min_score_entry.pack(side="left", padx=(0, 10))
+        min_score_entry.insert(0, "0.3")  # Default value
 
         # Cell values display frame
         values_frame = ttk.Frame(tab)
@@ -881,75 +920,48 @@ class DatasheetGeneratorApp:
             ttk.Button(btn_frame, text="Clear All",
                        command=lambda dt=data_type, l=listbox: clear_coordinates(dt, l)).pack(side="left", padx=2)
             
-            # Semantic mapping button
-            def semantic_map_coordinate(dt=data_type, combo_box=combo):
-                current_coord = coord_entry.get().strip()
-                if not current_coord:
-                    messagebox.showwarning("Warning", "Please select a coordinate first")
-                    return
-                
-                print(f"DEBUG: Auto Map clicked for data_type: '{dt}'")
-                print(f"DEBUG: Current coordinate: '{current_coord}'")
-                
+            # AutoMap button with min score entry
+            def automap_coordinate(dt=data_type, combo_box=combo):                    # Get min score from entry box
+                min_score = float(min_score_entry.get().strip())
+
+                full_selection = xw.apps.active.selection.address
+                print(f"DEBUG: Full selection: {full_selection}")
                 # Load semantic model if not already loaded
                 if not self.model_loaded and not self.loading_model:
                     self.load_semantic_model_async()
-                    messagebox.showinfo("Info", "Loading semantic model. Please try again in a moment.")
                     return
                 
-                # Perform semantic mapping
-                best_match = self.auto_map_coordinate_semantic(dt, current_coord)
-                if best_match:
-                    # Set the combo box to the best match
-                    combo_box.set(best_match)
-                    # Automatically add the coordinate
-                    add_coordinate(dt, coord_entry, combo_box, listbox)
+                # Check selection type
+                clean_selection = full_selection.replace('$', '')
+                
+                if ',' in clean_selection:
+                    # Non-contiguous selection - process multiple ranges
+                    print(f"DEBUG: Non-contiguous selection: {clean_selection}")
+                    self.automap_noncontiguous(dt, full_selection, combo_box, coord_entry, listbox, min_score)
+                elif ':' in clean_selection:
+                    print(f"DEBUG: Single contiguous range: {clean_selection}")
+                    # Single contiguous range - iterate through cells
+                    self.automap_range(dt, full_selection, combo_box, coord_entry, listbox, min_score)
+                else:
+                    # Single cell - perform mapping
+                    print(f"DEBUG: Single cell: {clean_selection}")
+                    current_coord = coord_entry.get().strip()
+                    if current_coord:
+                        best_match, score, header = self.auto_map_coordinate_semantic(dt, current_coord, min_score)
+                        if best_match:
+                            combo_box.set(best_match)
+                            add_coordinate(dt, coord_entry, combo_box, listbox)
+                            header_display = f"'{header}'" if header else "None"
+                            messagebox.showinfo("AutoMap Result", 
+                                f"Successfully mapped {current_coord} to '{best_match}'\nSimilarity Score: {score:.3f}\nHeader: {header_display}")
+                        else:
+                            header_display = f"'{header}'" if header else "None"
+                            messagebox.showinfo("AutoMap Result", 
+                                f"No match found for {current_coord}\nBest Score: {score:.3f} (below threshold {min_score})\nHeader: {header_display}")
             
-            ttk.Button(btn_frame, text="Auto Map",
-                       command=lambda dt=data_type, cb=combo: semantic_map_coordinate(dt, cb)).pack(side="left", padx=2)
-                       
-            # Blind AutoMap button
-            def blind_automap_coordinate(dt=data_type, combo_box=combo):
-                try:
-                    # Ask user for minimum score threshold
-                    min_score = self.get_min_score_threshold()
-                    if min_score is None:
-                        return  # User cancelled
-                    
-                    full_selection = xw.apps.active.selection.address
-                    
-                    # Load semantic model if not already loaded
-                    if not self.model_loaded and not self.loading_model:
-                        self.load_semantic_model_async()
-                        return
-                    
-                    # Check selection type
-                    clean_selection = full_selection.replace('$', '')
-                    
-                    if ',' in clean_selection:
-                        # Non-contiguous selection - process multiple ranges
-                        self.blind_automap_noncontiguous(dt, full_selection, combo_box, coord_entry, listbox, min_score)
-                    elif ':' in full_selection:
-                        # Single contiguous range - iterate through cells
-                        self.blind_automap_range(dt, full_selection, combo_box, coord_entry, listbox, min_score)
-                    else:
-                        # Single cell - perform silent mapping
-                        current_coord = coord_entry.get().strip()
-                        if current_coord:
-                            best_match, score = self.auto_map_coordinate_semantic_silent(dt, current_coord, min_score)
-                            if best_match:
-                                combo_box.set(best_match)
-                                add_coordinate(dt, coord_entry, combo_box, listbox)
-                                messagebox.showinfo("Blind AutoMap Result", 
-                                    f"Successfully mapped {current_coord} to '{best_match}'\nSimilarity Score: {score:.3f}")
-                            else:
-                                messagebox.showinfo("Blind AutoMap Result", 
-                                    f"No match found for {current_coord}\nBest Score: {score:.3f} (below threshold {min_score})")
-                except Exception as e:
-                    print(f"Error in blind automap: {e}")
-            
-            ttk.Button(btn_frame, text="Blind AutoMap",
-                       command=lambda dt=data_type, cb=combo: blind_automap_coordinate(dt, cb)).pack(side="left", padx=2)
+            # AutoMap button
+            ttk.Button(btn_frame, text="AutoMap",
+                       command=lambda dt=data_type, cb=combo: automap_coordinate(dt, cb)).pack(side="left", padx=2)
 
             # Store references for later use
             setattr(self, f"{data_type}_combo", combo)
@@ -1855,13 +1867,19 @@ IMPORTANT NOTES:
                 print(f"WARNING: Source sheet name '{self.source_sheet_name}' starts with datasheet prefix '{self.ds_str}'")
                 print("This may cause issues with sheet identification. Consider using a different prefix.")
 
+            # Convert dropdown selection to the correct parameter value
+            color_option = self.color_coding_var.get()
+            if color_option == "None (Black)":
+                color_option = None
+            
             self.new_sheets = add_update_datasheets(self.excel_mgr.wb, self.source_sheet_name,
                                             self.tag_cell_values, self.datasheet_coord,
                                             self.ds_str, rows_per_sheet=self.rows_per_sheet,
                                             key_coordinate=self.top_tag,
                                             sig_figs=self.sig_figs, # Pass sig_figs
                                             tolerance=self.rounding_tolerance, # Pass tolerance
-                                            halt_callback=self.check_halt_flag) # Pass halt callback
+                                            halt_callback=self.check_halt_flag, # Pass halt callback
+                                            cell_update_option=color_option) # Pass color coding option
             self.excel_mgr.mark_as_modified()
             
             if self.halt_flag:
@@ -2091,6 +2109,96 @@ IMPORTANT NOTES:
         view_window = tk.Toplevel(self.root)
         view_window.title(name)
 
+        # Create a button frame for actions
+        button_frame = tk.Frame(view_window)
+        button_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        def refresh_display():
+            """Refresh the display with current data"""
+            scrolled_text.configure(state='normal')
+            scrolled_text.delete(1.0, tk.END)
+            
+            current_data = self.get_data_type_data(data_type)
+            if current_data:
+                for key, value in current_data.items():
+                    scrolled_text.insert(tk.END, f"{key}: {value}\n\n")
+            else:
+                scrolled_text.insert(tk.END, f"No {name} data available.")
+            
+            scrolled_text.configure(state='disabled')
+
+        def split_keys():
+            """Split composite keys based on delimiter"""
+            # Ask for delimiter
+            delimiter = askstring("Split Keys", 
+                                "Enter delimiter to split keys on (e.g., ';', ',', '|'):",
+                                initialvalue=";")
+            
+            if not delimiter:
+                return
+            
+            # Get current data
+            current_data = self.get_data_type_data(data_type)
+            if not current_data:
+                tk.messagebox.showwarning("No Data", f"No {name} data available to split.")
+                return
+            
+            # Find keys that contain the delimiter
+            keys_to_split = []
+            for key in current_data.keys():
+                if delimiter in str(key):
+                    keys_to_split.append(key)
+            
+            if not keys_to_split:
+                tk.messagebox.showinfo("No Split Needed", 
+                                     f"No keys found containing the delimiter '{delimiter}'.")
+                return
+            
+            # Confirm the split operation
+            if len(keys_to_split) == 1:
+                message = f"Found 1 key to split: '{keys_to_split[0]}'\n\nThis will create separate entries for each part."
+            else:
+                message = f"Found {len(keys_to_split)} keys to split:\n"
+                for key in keys_to_split[:5]:  # Show first 5 keys
+                    message += f"  - {key}\n"
+                if len(keys_to_split) > 5:
+                    message += f"  ... and {len(keys_to_split) - 5} more\n"
+                message += "\nThis will create separate entries for each part."
+            
+            if not tk.messagebox.askyesno("Confirm Split", message):
+                return
+            
+            # Perform the split
+            new_data = {}
+            split_count = 0
+            
+            for key, value in current_data.items():
+                if delimiter in str(key):
+                    # Split the key
+                    key_parts = str(key).split(delimiter)
+                    for part in key_parts:
+                        part = part.strip()  # Remove leading/trailing whitespace
+                        if part:  # Only add non-empty parts
+                            new_data[part] = value  # Use the same value for all split keys
+                            split_count += 1
+                else:
+                    # Keep the original key unchanged
+                    new_data[key] = value
+            
+            # Update the data
+            self.set_data_type_data(data_type, new_data)
+            
+            # Show success message
+            tk.messagebox.showinfo("Split Complete", 
+                                 f"Successfully split {len(keys_to_split)} keys into {split_count} new entries.")
+            
+            # Refresh the display
+            refresh_display()
+
+        # Add Split Keys button
+        split_button = tk.Button(button_frame, text="Split Keys", command=split_keys)
+        split_button.pack(side=tk.LEFT, padx=5)
+
         # Create a scrolled text widget to display the data
         scrolled_text = scrolledtext.ScrolledText(view_window, width=40, height=20)
         scrolled_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)  # Fill and expand to fill the window
@@ -2219,7 +2327,7 @@ IMPORTANT NOTES:
         """Handle application closing"""
         if self.excel_mgr.is_dirty:
             if messagebox.askyesno("Save Changes",
-                                 "There are unsaved changes. Would you like to save before closing?"):
+                                 "There are unsaved changes. Please save a copy of the current workbook first. Would you close without saving?"):
                 self.excel_mgr.save_workbook()
         self.excel_mgr.cleanup()
         self.root.destroy()
@@ -2807,6 +2915,7 @@ IMPORTANT NOTES:
     
     def open_semantic_matcher(self):
         """Opens the Semantic Matcher window."""
+        from semantic_matcher import SemanticMatcherApp
         semantic_window = tk.Toplevel(self.root)
         SemanticMatcherApp(semantic_window, self)
 
@@ -2843,12 +2952,12 @@ IMPORTANT NOTES:
         messagebox.showerror("Error", f"Failed to load semantic model: {error_msg}")
     
     def get_min_score_threshold(self):
-        """Ask user for minimum score threshold for blind automap"""
+        """Ask user for minimum score threshold for automap"""
         from tkinter import simpledialog
         
         # Ask user for minimum score (default 0.3)
         result = simpledialog.askfloat(
-            "Blind AutoMap Settings",
+            "AutoMap Settings",
             "Enter minimum similarity score (0.0 - 1.0):\n\n" +
             "• 0.1-0.3: Very permissive (more matches, less accurate)\n" +
             "• 0.4-0.6: Balanced (recommended)\n" +
@@ -2927,114 +3036,32 @@ IMPORTANT NOTES:
             print(f"Error getting cell values above/left: {e}")
             return None, None
     
-    def auto_map_coordinate_semantic(self, data_type, current_coord):
-        """Automatically map a coordinate using semantic similarity"""
-        print(f"DEBUG: auto_map_coordinate_semantic called with data_type='{data_type}'")
+    def auto_map_coordinate_semantic(self, data_type, current_coord, min_score=0.3):
+        """Version of semantic mapping without user feedback dialogs"""
+        print(f"\n=== AUTO_MAP_COORDINATE_SEMANTIC DEBUG ===")
+        print(f"Input parameters:")
+        print(f"  - data_type: {data_type}")
+        print(f"  - current_coord: {current_coord}")
+        print(f"  - min_score: {min_score}")
         
-        if not self.model_loaded:
-            messagebox.showwarning("Warning", "Semantic model is still loading. Please wait.")
-            return None
-        
-        try:
-            # Get the current sheet
-            if not hasattr(self, 'excel_mgr') or not self.excel_mgr.wb:
-                messagebox.showerror("Error", "No Excel workbook open")
-                return None
-            
-            # Get the active sheet
-            sheet = self.excel_mgr.wb.sheets.active
-            
-            # Get the cell values above and to the left
-            above_value, left_value = self.get_cell_values_above_and_left(sheet, current_coord)
-            if not above_value and not left_value:
-                messagebox.showinfo("Info", "No text found above or to the left of the selected cell")
-                return None
-            
-            # Get the combo values for this data type (these are what appear in the dropdown)
-            combo_values = []
-            for dt in self.get_all_data_types():
-                if dt == data_type:
-                    data = self.get_data_type_data(dt)
-                    for key, value in data.items():
-                        if isinstance(value, dict):
-                            combo_values = list(value.keys())
-                            break
-                    break
-            
-            if not combo_values:
-                config = self.get_data_type_config(data_type)
-                name = config.get('name', data_type.upper())
-                messagebox.showwarning("Warning", f"No {name} data available. Please load {name} data first using the 'Load {name} from Datasheet' or 'Load {name} from JSON' buttons.")
-                return None
-            
-            # Calculate similarity scores for both above and left values
-            best_match = None
-            best_score = -1
-            source_direction = ""
-            
-            # Check similarity for above value
-            if above_value:
-                for combo_value in combo_values:
-                    score = self.compute_semantic_similarity(above_value, combo_value)
-                    if score > best_score:
-                        best_score = score
-                        best_match = combo_value
-                        source_direction = "above"
-            
-            # Check similarity for left value
-            if left_value:
-                for combo_value in combo_values:
-                    score = self.compute_semantic_similarity(left_value, combo_value)
-                    if score > best_score:
-                        best_score = score
-                        best_match = combo_value
-                        source_direction = "left"
-            
-            # Show results to user
-            if best_match and best_score > 0.3:  # Threshold for acceptable similarity
-                source_text = above_value if source_direction == "above" else left_value
-                result = messagebox.askyesno(
-                    "Semantic Mapping Found", 
-                    f"Found potential match:\n\n"
-                    f"Text from {source_direction}: '{source_text}'\n"
-                    f"Best match: '{best_match}'\n"
-                    f"Similarity score: {best_score:.3f}\n\n"
-                    f"Use this mapping?"
-                )
-                
-                if result:
-                    return best_match
-                else:
-                    return None
-            else:
-                text_info = []
-                if above_value:
-                    text_info.append(f"Above: '{above_value}'")
-                if left_value:
-                    text_info.append(f"Left: '{left_value}'")
-                
-                messagebox.showinfo(
-                    "No Good Match Found",
-                    f"No good semantic match found for:\n"
-                    f"{' and '.join(text_info)}\n\n"
-                    f"Best score was: {best_score:.3f}"
-                )
-                return None
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Error in semantic mapping: {str(e)}")
-            return None
-
-    def auto_map_coordinate_semantic_silent(self, data_type, current_coord, min_score=0.3):
-        """Silent version of semantic mapping without user feedback dialogs"""
         try:
             # Get cell values above and left using the existing method
             sheet = xw.apps.active.books.active.sheets.active
+            print(f"  - Active sheet: {sheet.name}")
+            
             above_value, left_value = self.get_cell_values_above_and_left(sheet, current_coord)
+            print(f"  - Above value: '{above_value}'")
+            print(f"  - Left value: '{left_value}'")
             
             # Get available options for this data type
             data = self.get_data_type_data(data_type)
+            print(f"  - Data type data retrieved: {data is not None}")
+            if data:
+                print(f"  - Data keys count: {len(data)}")
+                print(f"  - First data key: {list(data.keys())[0] if data else 'None'}")
+            
             if not data:
+                print("  - ERROR: No data found for data_type")
                 return None, 0.0
             
             # Get the options (keys from the first value dict)
@@ -3043,7 +3070,11 @@ IMPORTANT NOTES:
                 options = list(value.keys())
                 break
             
+            print(f"  - Available options: {options}")
+            print(f"  - Options count: {len(options)}")
+            
             if not options:
+                print("  - ERROR: No options found in data")
                 return None, 0.0
             
             # Prepare text for semantic comparison
@@ -3053,115 +3084,79 @@ IMPORTANT NOTES:
             if left_value and str(left_value).strip():
                 text_options.append(str(left_value).strip())
             
+            print(f"  - Text options for comparison: {text_options}")
+            print(f"  - Text options count: {len(text_options)}")
+            
             if not text_options:
+                print("  - ERROR: No text options available for comparison")
                 return None, 0.0
             
+            # Check if semantic model is available
+            if not hasattr(self, 'semantic_model') or self.semantic_model is None:
+                print("  - ERROR: Semantic model not available")
+                return None, 0.0
+            
+            print(f"  - Semantic model available: {self.semantic_model is not None}")
+            
             # Encode options and text for comparison
+            print("  - Encoding options...")
             option_embeddings = self.semantic_model.encode(options)
+            print(f"  - Option embeddings shape: {option_embeddings.shape}")
             
             best_match = None
             best_score = 0
+            best_header = None
             
-            for text in text_options:
+            print("  - Computing similarities...")
+            for i, text in enumerate(text_options):
+                print(f"    Processing text {i+1}: '{text}'")
                 text_embedding = self.semantic_model.encode([text])
                 similarities = np.dot(text_embedding, option_embeddings.T).flatten()
                 
+                print(f"    Similarities: {similarities}")
                 max_idx = np.argmax(similarities)
                 score = similarities[max_idx]
+                best_option = options[max_idx]
+                
+                print(f"    Best match: '{best_option}' with score: {score:.4f}")
                 
                 if score > best_score:
                     best_score = score
-                    best_match = options[max_idx]
+                    best_match = best_option
+                    best_header = text
+                    print(f"    -> New best match!")
             
-            # Return best match and score
+            print(f"  - Final best match: '{best_match}'")
+            print(f"  - Final best score: {best_score:.4f}")
+            print(f"  - Final best header: '{best_header}'")
+            print(f"  - Score threshold: {min_score}")
+            print(f"  - Meets threshold: {best_score > min_score}")
+            
+            # Return best match, score, and header
             if best_match and best_score > min_score:
-                return best_match, best_score
+                print(f"  - RESULT: SUCCESS - Returning match '{best_match}' with score {best_score:.4f}")
+                return best_match, best_score, best_header
             else:
-                return None, best_score
+                print(f"  - RESULT: FAILED - Score {best_score:.4f} below threshold {min_score}")
+                return None, best_score, best_header
                 
         except Exception as e:
-            print(f"Error in silent semantic mapping: {e}")
+            print(f"  - ERROR in semantic mapping: {e}")
+            import traceback
+            print(f"  - Traceback: {traceback.format_exc()}")
             return None, 0.0
 
-    def blind_automap_range(self, data_type, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
-        """Iterate through a range of cells and perform silent semantic mapping"""
+    def automap_range(self, data_type, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
+        """Iterate through a range of cells and perform semantic mapping"""
         try:
             # Parse the range
             clean_selection = full_selection.replace('$', '')
-            start_cell, end_cell = clean_selection.split(':')
             
-            # Get the sheet
-            sheet = xw.apps.active.books.active.sheets.active
-            
-            # Get the range object
-            range_obj = sheet.range(f"{start_cell}:{end_cell}")
-            
-            # Handle merged cells and iterate through unique cells
-            processed_cells = set()
-            successful_mappings = 0
-            mapping_results = []  # Track all mapping results with scores
-            
-            # Get the dimensions of the range
-            rows = range_obj.shape[0]
-            cols = range_obj.shape[1]
-            
-            # Iterate through each cell in the range
-            for row in range(rows):
-                for col in range(cols):
-                    # Get the current cell
-                    cell = range_obj.offset(row, col).resize(1, 1)
-                    cell_address = cell.address.replace('$', '')
-                    
-                    # Skip if we've already processed this cell (due to merged cells)
-                    if cell_address in processed_cells:
-                        continue
-                    
-                    # Check if this cell is part of a merged range
-                    merged_range = None
-                    try:
-                        for merged in sheet.api.MergedCells:
-                            if cell.api.Address in merged.Address:
-                                # This cell is part of a merged range
-                                merged_range = merged.Address.replace('$', '')
-                                # Add all cells in the merged range to processed set
-                                merge_start, merge_end = merged_range.split(':')
-                                merge_range_obj = sheet.range(f"{merge_start}:{merge_end}")
-                                # Use shape to iterate through merged range
-                                merge_rows = merge_range_obj.shape[0]
-                                merge_cols = merge_range_obj.shape[1]
-                                for mr in range(merge_rows):
-                                    for mc in range(merge_cols):
-                                        merge_cell = merge_range_obj.offset(mr, mc).resize(1, 1)
-                                        processed_cells.add(merge_cell.address.replace('$', ''))
-                                break
-                    except:
-                        # If merged cells check fails, continue normally
-                        pass
-                
-                    # Use the top-left cell of merged range or the single cell
-                    target_cell = merged_range.split(':')[0] if merged_range else cell_address
-                    
-                    # Skip empty cells
-                    cell_value = sheet.range(target_cell).value
-                    if not cell_value or not str(cell_value).strip():
-                        processed_cells.add(cell_address)
-                        continue
-                    
-                    # Perform silent semantic mapping for this cell
-                    best_match, score = self.auto_map_coordinate_semantic_silent(data_type, target_cell, min_score)
-                    
-                    # Record the result
-                    if best_match:
-                        # Add the mapping silently
-                        coordinate_values = self.get_data_type_coordinate_values(data_type)
-                        coordinate_values[target_cell] = best_match
-                        self.set_data_type_coordinate_values(data_type, coordinate_values)
-                        successful_mappings += 1
-                        mapping_results.append(f"✓ {target_cell} → {best_match} (score: {score:.3f})")
-                    else:
-                        mapping_results.append(f"✗ {target_cell} → No match (score: {score:.3f})")
-                    
-                    processed_cells.add(cell_address)
+            # Extract all cell addresses from the range
+            cell_addresses = self.extract_cell_addresses_from_range(clean_selection)
+            print('debug: cell_addresses', cell_addresses)
+            # Process all cells using the unified processor
+            successful_mappings, mapping_results = self.process_cells_for_automap(data_type, cell_addresses, min_score)
             
             # Update the listbox to show all new mappings
             if hasattr(self, f"{data_type}_listbox"):
@@ -3169,7 +3164,7 @@ IMPORTANT NOTES:
                 self.update_single_listbox(data_type, listbox_obj)
             
             # Show results summary
-            summary = f"Blind AutoMap Range Results:\n\n"
+            summary = f"AutoMap Range Results:\n\n"
             summary += f"Range: {clean_selection}\n"
             summary += f"Successful mappings: {successful_mappings}\n"
             summary += f"Total cells processed: {len(mapping_results)}\n"
@@ -3180,13 +3175,13 @@ IMPORTANT NOTES:
                 if len(mapping_results) > 10:
                     summary += f"\n... and {len(mapping_results) - 10} more results"
             
-            messagebox.showinfo("Blind AutoMap Results", summary)
-            print(f"Blind AutoMap completed: {successful_mappings} successful mappings")
+            messagebox.showinfo("AutoMap Results", summary)
+            print(f"AutoMap completed: {successful_mappings} successful mappings")
             
         except Exception as e:
-            print(f"Error in blind automap range: {e}")
+            print(f"Error in automap range: {e}")
 
-    def blind_automap_noncontiguous(self, data_type, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
+    def automap_noncontiguous(self, data_type, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
         """Process non-contiguous selections (multiple ranges separated by commas)"""
         try:
             # Parse the non-contiguous selection
@@ -3204,10 +3199,11 @@ IMPORTANT NOTES:
                 
                 if ':' in range_addr:
                     # This is a range (e.g., A1:B5)
-                    successful_mappings, mapping_results = self.process_single_range_for_automap(data_type, range_addr, min_score)
+                    cell_addresses = self.extract_cell_addresses_from_range(range_addr)
+                    successful_mappings, mapping_results = self.process_cells_for_automap(data_type, cell_addresses, min_score)
                 else:
                     # This is a single cell (e.g., C3)
-                    successful_mappings, mapping_results = self.process_single_cell_for_automap(data_type, range_addr, min_score)
+                    successful_mappings, mapping_results = self.process_cells_for_automap(data_type, [range_addr], min_score)
                 
                 total_successful_mappings += successful_mappings
                 all_mapping_results.extend(mapping_results)
@@ -3219,7 +3215,7 @@ IMPORTANT NOTES:
                 self.update_single_listbox(data_type, listbox_obj)
             
             # Show results summary
-            summary = f"Blind AutoMap Non-Contiguous Results:\n\n"
+            summary = f"AutoMap Non-Contiguous Results:\n\n"
             summary += f"Selection: {clean_selection}\n"
             summary += f"Ranges processed: {len(ranges)}\n"
             summary += f"Successful mappings: {total_successful_mappings}\n"
@@ -3231,120 +3227,13 @@ IMPORTANT NOTES:
                 if len(all_mapping_results) > 15:
                     summary += f"\n... and {len(all_mapping_results) - 15} more results"
             
-            messagebox.showinfo("Blind AutoMap Results", summary)
-            print(f"Non-contiguous Blind AutoMap completed: {total_successful_mappings} total successful mappings")
+            messagebox.showinfo("AutoMap Results", summary)
+            print(f"Non-contiguous AutoMap completed: {total_successful_mappings} total successful mappings")
             
         except Exception as e:
-            print(f"Error in blind automap non-contiguous: {e}")
+            print(f"Error in automap non-contiguous: {e}")
 
-    def process_single_range_for_automap(self, data_type, range_addr, min_score=0.3):
-        """Process a single range for automap (helper for non-contiguous processing)"""
-        try:
-            # Get the sheet
-            sheet = xw.apps.active.books.active.sheets.active
-            
-            # Get the range object
-            range_obj = sheet.range(range_addr)
-            
-            # Handle merged cells and iterate through unique cells
-            processed_cells = set()
-            successful_mappings = 0
-            mapping_results = []
-            
-            # Get the dimensions of the range
-            rows = range_obj.shape[0]
-            cols = range_obj.shape[1]
-            
-            # Iterate through each cell in the range
-            for row in range(rows):
-                for col in range(cols):
-                    # Get the current cell
-                    cell = range_obj.offset(row, col).resize(1, 1)
-                    cell_address = cell.address.replace('$', '')
-                    
-                    # Skip if we've already processed this cell (due to merged cells)
-                    if cell_address in processed_cells:
-                        continue
-                    
-                    # Check if this cell is part of a merged range
-                    merged_range = None
-                    try:
-                        for merged in sheet.api.MergedCells:
-                            if cell.api.Address in merged.Address:
-                                # This cell is part of a merged range
-                                merged_range = merged.Address.replace('$', '')
-                                # Add all cells in the merged range to processed set
-                                merge_start, merge_end = merged_range.split(':')
-                                merge_range_obj = sheet.range(f"{merge_start}:{merge_end}")
-                                # Use shape to iterate through merged range
-                                merge_rows = merge_range_obj.shape[0]
-                                merge_cols = merge_range_obj.shape[1]
-                                for mr in range(merge_rows):
-                                    for mc in range(merge_cols):
-                                        merge_cell = merge_range_obj.offset(mr, mc).resize(1, 1)
-                                        processed_cells.add(merge_cell.address.replace('$', ''))
-                                break
-                    except:
-                        # If merged cells check fails, continue normally
-                        pass
-                
-                    # Use the top-left cell of merged range or the single cell
-                    target_cell = merged_range.split(':')[0] if merged_range else cell_address
-                    
-                    # Skip empty cells
-                    cell_value = sheet.range(target_cell).value
-                    if not cell_value or not str(cell_value).strip():
-                        processed_cells.add(cell_address)
-                        continue
-                    
-                    # Perform silent semantic mapping for this cell
-                    best_match, score = self.auto_map_coordinate_semantic_silent(data_type, target_cell, min_score)
-                    
-                    # Record the result
-                    if best_match:
-                        # Add the mapping silently
-                        coordinate_values = self.get_data_type_coordinate_values(data_type)
-                        coordinate_values[target_cell] = best_match
-                        self.set_data_type_coordinate_values(data_type, coordinate_values)
-                        successful_mappings += 1
-                        mapping_results.append(f"✓ {target_cell} → {best_match} (score: {score:.3f})")
-                    else:
-                        mapping_results.append(f"✗ {target_cell} → No match (score: {score:.3f})")
-                    
-                    processed_cells.add(cell_address)
-            
-            return successful_mappings, mapping_results
-            
-        except Exception as e:
-            print(f"Error processing range {range_addr}: {e}")
-            return 0, []
 
-    def process_single_cell_for_automap(self, data_type, cell_addr, min_score=0.3):
-        """Process a single cell for automap (helper for non-contiguous processing)"""
-        try:
-            # Get the sheet
-            sheet = xw.apps.active.books.active.sheets.active
-            
-            # Skip empty cells
-            cell_value = sheet.range(cell_addr).value
-            if not cell_value or not str(cell_value).strip():
-                return 0, []
-            
-            # Perform silent semantic mapping for this cell
-            best_match, score = self.auto_map_coordinate_semantic_silent(data_type, cell_addr, min_score)
-            
-            if best_match:
-                # Add the mapping silently
-                coordinate_values = self.get_data_type_coordinate_values(data_type)
-                coordinate_values[cell_addr] = best_match
-                self.set_data_type_coordinate_values(data_type, coordinate_values)
-                return 1, [f"✓ {cell_addr} → {best_match} (score: {score:.3f})"]
-            else:
-                return 0, [f"✗ {cell_addr} → No match (score: {score:.3f})"]
-            
-        except Exception as e:
-            print(f"Error processing cell {cell_addr}: {e}")
-            return 0, []
 
     def update_single_listbox(self, data_type, listbox):
         """Update a single listbox for a specific data type"""
@@ -3359,6 +3248,160 @@ IMPORTANT NOTES:
                 combo = self.coordinate_combinations[key]
                 coord_display += f" [Combines: {', '.join(combo.get('combines', []))} ({combo.get('operation', 'add')})]"
             listbox.insert(tk.END, coord_display)
+
+    def process_cells_for_automap(self, data_type, cell_addresses, min_score=0.3):
+        """Unified function to process any collection of cells for automapping"""
+        print(f"\n=== PROCESS_CELLS_FOR_AUTOMAP DEBUG ===")
+        print(f"Input parameters:")
+        print(f"  - data_type: {data_type}")
+        print(f"  - cell_addresses: {cell_addresses}")
+        print(f"  - min_score: {min_score}")
+        print(f"  - Total cells to process: {len(cell_addresses)}")
+        
+        try:
+            # Get the sheet
+            sheet = xw.apps.active.books.active.sheets.active
+            print(f"  - Active sheet: {sheet.name}")
+            
+            # Handle merged cells and iterate through unique cells
+            processed_cells = set()
+            successful_mappings = 0
+            mapping_results = []
+            
+            # Print initial cell count
+            print(f"Starting automap with {len(cell_addresses)} input cells...")
+            
+            for i, cell_addr in enumerate(cell_addresses):
+                print(f"\n--- Processing cell {i+1}/{len(cell_addresses)}: {cell_addr} ---")
+                cell_addr = cell_addr.strip()
+                if not cell_addr:
+                    print(f"  - Skipping empty cell address")
+                    continue
+                    
+                # Skip if we've already processed this cell (due to merged cells)
+                if cell_addr in processed_cells:
+                    print(f"  - Skipping already processed cell: {cell_addr}")
+                    continue
+                
+                # Check if this cell is part of a merged range
+                merged_range = None
+                try:
+                    print(f"  - Checking for merged cells...")
+                    # Try a different approach to check for merged cells
+                    cell_range = sheet.range(cell_addr)
+                    if hasattr(cell_range.api, 'MergeCells') and cell_range.api.MergeCells:
+                        # This cell is part of a merged range
+                        merged_range = cell_range.api.MergeArea.Address.replace('$', '')
+                        print(f"  - Found merged range: {merged_range}")
+                        
+                        # Get the top-left cell of the merged range
+                        top_left_cell = merged_range.split(':')[0]
+                        print(f"  - Top-left cell of merged range: {top_left_cell}")
+                        
+                        # If this cell is not the top-left cell, skip it
+                        if cell_addr != top_left_cell:
+                            print(f"  - Skipping {cell_addr} (not top-left of merged range {merged_range})")
+                            processed_cells.add(cell_addr)
+                            continue
+                        
+                        # Add all cells in the merged range to processed set to avoid reprocessing
+                        merge_start, merge_end = merged_range.split(':')
+                        merge_range_obj = sheet.range(f"{merge_start}:{merge_end}")
+                        # Use shape to iterate through merged range
+                        merge_rows = merge_range_obj.shape[0]
+                        merge_cols = merge_range_obj.shape[1]
+                        print(f"  - Merged range dimensions: {merge_rows}x{merge_cols}")
+                        for mr in range(merge_rows):
+                            for mc in range(merge_cols):
+                                merge_cell = merge_range_obj.offset(mr, mc).resize(1, 1)
+                                processed_cells.add(merge_cell.address.replace('$', ''))
+                        print(f"  - Added {merge_rows * merge_cols} cells from merged range to processed set")
+                    else:
+                        print(f"  - No merged cells found for {cell_addr}")
+                except Exception as e:
+                    # If merged cells check fails, continue normally
+                    print(f"  - Merged cells check failed: {e}")
+                    pass
+            
+                # Use the top-left cell of merged range or the single cell
+                target_cell = merged_range.split(':')[0] if merged_range else cell_addr
+                print(f"  - Target cell for processing: {target_cell}")
+                
+                # For auto mapping, we don't need to check if the selected cell has a value
+                # because we're mapping based on headers (above/left), not the data values
+                print(f"  - Processing cell for auto mapping (value check skipped)")
+                
+                # Perform semantic mapping for this cell
+                print(f"  - Calling auto_map_coordinate_semantic...")
+                best_match, score, header = self.auto_map_coordinate_semantic(data_type, target_cell, min_score)
+                print(f"  - Semantic mapping result:")
+                print(f"    - best_match: {best_match}")
+                print(f"    - score: {score}")
+                print(f"    - header: {header}")
+                
+                # Record the result
+                if best_match:
+                    print(f"  - SUCCESS: Adding mapping for {target_cell}")
+                    # Add the mapping
+                    coordinate_values = self.get_data_type_coordinate_values(data_type)
+                    print(f"  - Current coordinate values count: {len(coordinate_values)}")
+                    coordinate_values[target_cell] = best_match
+                    self.set_data_type_coordinate_values(data_type, coordinate_values)
+                    successful_mappings += 1
+                    header_display = f"'{header}'" if header else "None"
+                    mapping_results.append(f"✓ {target_cell} → {best_match} (score: {score:.3f}, header: {header_display})")
+                    print(f"  - Mapping added successfully")
+                else:
+                    print(f"  - FAILED: No match found for {target_cell}")
+                    header_display = f"'{header}'" if header else "None"
+                    mapping_results.append(f"✗ {target_cell} → No match (score: {score:.3f}, header: {header_display})")
+                
+                processed_cells.add(cell_addr)
+                print(f"  - Added {cell_addr} to processed cells set")
+            
+            # Print total unique cells processed (merged cells count as one)
+            print(f"\n=== AUTOMAP SUMMARY ===")
+            print(f"Total unique cells processed: {len(processed_cells)}")
+            print(f"Successful mappings: {successful_mappings}")
+            print(f"Failed mappings: {len(mapping_results) - successful_mappings}")
+            print(f"Success rate: {(successful_mappings/len(processed_cells)*100):.1f}%" if processed_cells else "N/A")
+            
+            return successful_mappings, mapping_results
+            
+        except Exception as e:
+            print(f"  - ERROR in process_cells_for_automap: {e}")
+            import traceback
+            print(f"  - Traceback: {traceback.format_exc()}")
+            return 0, []
+
+    def extract_cell_addresses_from_range(self, range_addr):
+        """Extract all individual cell addresses from a range address"""
+        try:
+            # Get the sheet
+            sheet = xw.apps.active.books.active.sheets.active
+            
+            # Get the range object
+            range_obj = sheet.range(range_addr)
+            
+            # Get the dimensions of the range
+            rows = range_obj.shape[0]
+            cols = range_obj.shape[1]
+            
+            cell_addresses = []
+            
+            # Iterate through each cell in the range
+            for row in range(rows):
+                for col in range(cols):
+                    # Get the current cell
+                    cell = range_obj.offset(row, col).resize(1, 1)
+                    cell_address = cell.address.replace('$', '')
+                    cell_addresses.append(cell_address)
+            
+            return cell_addresses
+            
+        except Exception as e:
+            print(f"Error extracting cell addresses from range {range_addr}: {e}")
+            return []
 
 
 if __name__ == "__main__":
