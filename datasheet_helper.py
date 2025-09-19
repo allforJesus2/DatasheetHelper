@@ -305,7 +305,6 @@ class DatasheetGeneratorApp:
         
         # Initialize transform-related attributes
         print("DEBUG: Setting transform attributes...")
-        self.td_xkey = 'TAG NUMBER'  # Default TD key for transformation
 
         # Semantic similarity model
         print("DEBUG: Initializing semantic model attributes...")
@@ -380,6 +379,30 @@ class DatasheetGeneratorApp:
     def get_all_data_types(self):
         """Get all available data types"""
         return list(self.data_types.keys())
+    
+    def get_primary_data_type(self):
+        """Get the primary data type (currently selected tab)"""
+        if hasattr(self, 'data_sources_notebook'):
+            try:
+                # Get the currently selected tab index
+                selected_index = self.data_sources_notebook.index(self.data_sources_notebook.select())
+                # Get all data types in the same order as tabs
+                data_types = list(self.get_all_data_types())
+                if 0 <= selected_index < len(data_types):
+                    return data_types[selected_index]
+            except Exception as e:
+                print(f"Error getting selected tab: {e}")
+        
+        # Fallback to first data type if no tab is selected or error occurs
+        return list(self.data_types.keys())[0] if self.data_types else None
+    
+    def on_tab_changed(self, event):
+        """Handle tab change event to update primary data type"""
+        primary_data_type = self.get_primary_data_type()
+        if primary_data_type:
+            config = self.get_data_type_config(primary_data_type)
+            name = config.get('name', primary_data_type.upper())
+            print(f"Primary data type changed to: {name} ({primary_data_type})")
     
     def add_data_type(self, data_type, config):
         """Add a new data type configuration"""
@@ -480,19 +503,107 @@ class DatasheetGeneratorApp:
             setattr(self, f'{data_type}_frame', frame)
         print("DEBUG: create_data_type_frames completed!")
     
+    def create_data_sources_notebook(self, parent):
+        """Create a notebook with tabs for each data source, each containing nested configuration tabs"""
+        print("DEBUG: Starting create_data_sources_notebook...")
+        
+        # Add a label for the data sources section
+        sources_label = tk.Label(parent, text="DATA SOURCES", font=("Arial", 10, "bold"), fg="green")
+        sources_label.pack(anchor=tk.W, padx=5, pady=(5,0))
+        
+        # Create the main data sources notebook
+        self.data_sources_notebook = ttk.Notebook(parent)
+        self.data_sources_notebook.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Create tabs for each data type
+        for data_type in self.get_all_data_types():
+            config = self.get_data_type_config(data_type)
+            name = config.get('name', data_type.upper())
+            short_name = config.get('short_name', data_type.upper())
+            
+            # Create main tab for this data type
+            data_source_tab = ttk.Frame(self.data_sources_notebook)
+            self.data_sources_notebook.add(data_source_tab, text=short_name)
+            
+            # Create the data source tab content
+            self.create_data_source_tab_content(data_source_tab, data_type, config)
+        
+        # Bind tab change event to update primary data type
+        self.data_sources_notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
+        
+        print("DEBUG: create_data_sources_notebook completed!")
+    
+    def create_data_source_tab_content(self, parent, data_type, config):
+        """Create the content for a data source tab, including file selection and nested configuration tabs"""
+        name = config.get('name', data_type.upper())
+        path_key = config.get('path_key', f'{data_type}_path')
+        
+        # Create file selection frame at the top
+        file_frame = ttk.LabelFrame(parent, text=f"{name} File Selection")
+        file_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # File selection row
+        file_row = tk.Frame(file_frame)
+        file_row.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Label
+        label = tk.Label(file_row, text=f"{name} File:", width=20)
+        label.pack(side=tk.LEFT, padx=5)
+        
+        # Entry
+        entry = tk.Entry(file_row)
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.entries.append((entry, path_key))
+        
+        # Buttons frame
+        buttons = tk.Frame(file_row)
+        buttons.pack(side=tk.RIGHT)
+        
+        # Browse button
+        tk.Button(buttons, text="Browse",
+                  command=lambda e=entry, p=path_key: self.browse(e, p)).pack(side=tk.LEFT, padx=2)
+        
+        # Open button
+        tk.Button(buttons, text="Open",
+                  command=lambda e=entry: self.open_file(e)).pack(side=tk.LEFT, padx=2)
+        
+        # Configure button
+        tk.Button(buttons, text="Configure",
+                  command=lambda n=name: self.configure(n)).pack(side=tk.LEFT, padx=2)
+        
+        # Generate button
+        tk.Button(buttons, text="Generate",
+                  command=lambda dt=data_type: self.generate_data_type(dt)).pack(side=tk.LEFT, padx=2)
+        
+        # View button
+        tk.Button(buttons, text="View",
+                  command=lambda n=name: self.view_data(n)).pack(side=tk.LEFT, padx=2)
+        
+        # Create nested notebook for configuration tabs (Coordinates, Filters, Transform)
+        config_notebook = ttk.Notebook(parent)
+        config_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create the three configuration tabs
+        coordinates_tab = ttk.Frame(config_notebook)
+        filters_tab = ttk.Frame(config_notebook)
+        transform_tab = ttk.Frame(config_notebook)
+        
+        config_notebook.add(coordinates_tab, text='Coordinates')
+        config_notebook.add(filters_tab, text='Filters')
+        config_notebook.add(transform_tab, text='Transform')
+        
+        # Create tab content
+        self.create_coordinates_tab(coordinates_tab, data_type)
+        self.create_filters_tab(filters_tab)
+        self.create_transform_tab(transform_tab)
+        
+        # Store reference to the config notebook for this data type
+        setattr(self, f'{data_type}_config_notebook', config_notebook)
+    
     def generate_data_type(self, data_type):
         """Generic method to generate data for any data type"""
-        config = self.get_data_type_config(data_type)
-        name = config.get('name', data_type.upper())
-        
-        # Call the appropriate generation method based on data type
-        if data_type == 'td':
-            self.generate_tag_data()
-        elif data_type == 'pc':
-            self.generate_process_conditions()
-        else:
-            # For new data types, use a generic approach
-            self.generate_generic_data(data_type)
+        # Use the generic approach for all data types - truly extensible
+        self.generate_generic_data(data_type)
     
     def generate_generic_data(self, data_type):
         """Generate data for any data type using the centralized system"""
@@ -595,9 +706,9 @@ class DatasheetGeneratorApp:
 
         self.entries = []  # Store entries for later reference
 
-        # Dynamically create frames for all data types
-        print("DEBUG: Creating data type frames...")
-        self.create_data_type_frames(main_frame)
+        # Create data sources notebook with tabs for each data type
+        print("DEBUG: Creating data sources notebook...")
+        self.create_data_sources_notebook(main_frame)
 
         # Add a visual separator between data sources and destination
         print("DEBUG: Creating separator and destination container...")
@@ -629,15 +740,11 @@ class DatasheetGeneratorApp:
 
         tk.Button(ds_buttons, text="Browse",
                   command=lambda: self.browse(ds_entry, "datasheets")).pack(side=tk.LEFT, padx=2)
-        tk.Button(ds_buttons, text="Configure",
-                  command=lambda: self.configure("Datasheets")).pack(side=tk.LEFT, padx=2)
-        
-        self.stop_button = tk.Button(ds_buttons, text="Stop",
-                  command=self.set_halt_flag, bg="red", fg="white", state="disabled")
-        self.stop_button.pack(side=tk.LEFT, padx=2)
-        
-        tk.Button(ds_buttons, text="View",
-                  command=lambda: self.view_data("Datasheets")).pack(side=tk.LEFT, padx=2)
+        tk.Button(ds_buttons, text="Open",
+                  command=self.configure_ds).pack(side=tk.LEFT, padx=2)
+        tk.Button(ds_buttons, text="Datasheet Configuration",
+                  command=self.open_datasheet_config_window).pack(side=tk.LEFT, padx=2)
+
 
         # Color coding method dropdown
         color_frame = tk.Frame(destination_container)
@@ -659,38 +766,17 @@ class DatasheetGeneratorApp:
         self.generate_button = tk.Button(generate_frame, text="Generate",
                   command=self.add_datasheets, font=("Arial", 10, "bold"), 
                   bg="green", fg="white", padx=20, pady=5)
-        self.generate_button.pack(expand=True)
+        self.generate_button.pack(side=tk.LEFT, expand=True)
+        
+        self.stop_button = tk.Button(generate_frame, text="Stop",
+                  command=self.set_halt_flag, bg="red", fg="white", state="disabled",
+                  font=("Arial", 10, "bold"), padx=20, pady=5)
+        self.stop_button.pack(side=tk.LEFT, padx=(10, 0))
 
         # Add status label
         self.status_label = tk.Label(destination_container, text="Ready", fg="black", font=("Arial", 9))
         self.status_label.pack(anchor=tk.W, padx=5, pady=(5,0))
 
-        # Create notebook after entries
-        print("DEBUG: Creating configuration notebook...")
-        self.config_frame = tk.Frame(main_frame)
-        self.config_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-
-        self.notebook = ttk.Notebook(self.config_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
-
-        # Create tab pages
-        print("DEBUG: Creating tab pages...")
-        coordinates_tab = ttk.Frame(self.notebook)
-        datasheet_tab = ttk.Frame(self.notebook)
-        filters_tab = ttk.Frame(self.notebook)
-        transform_tab = ttk.Frame(self.notebook)
-
-        print("DEBUG: Adding tabs to notebook...")
-        self.notebook.add(coordinates_tab, text='Coordinates')
-        self.notebook.add(datasheet_tab, text='Datasheet')
-        self.notebook.add(filters_tab, text='Filters')
-        self.notebook.add(transform_tab, text='Transform')
-
-        print("DEBUG: Creating tab content...")
-        self.create_coordinates_tab(coordinates_tab)
-        self.create_datasheet_tab(datasheet_tab)
-        self.create_filters_tab(filters_tab)
-        self.create_transform_tab(transform_tab)
         print("DEBUG: create_widgets completed!")
 
     # endregion
@@ -710,19 +796,28 @@ class DatasheetGeneratorApp:
             
             self.excel_mgr.open_workbook(self.datasheets)
 
-    def create_coordinates_tab(self, tab):
-        print("DEBUG: Starting create_coordinates_tab...")
+    def create_coordinates_tab(self, tab, data_type=None):
+        print(f"DEBUG: Starting create_coordinates_tab for data_type: {data_type}...")
 
         def get_combo_values():
-            """Get combo values for all data types using centralized system"""
-            combo_values = {}
-            for data_type in self.get_all_data_types():
+            """Get combo values for the specific data type"""
+            if data_type:
                 data = self.get_data_type_data(data_type)
                 values = []
                 for key, value in data.items():
                     values = list(value.keys())
                     break
-                combo_values[data_type] = values
+                return {data_type: values}
+            else:
+                # Fallback for backward compatibility
+                combo_values = {}
+                for dt in self.get_all_data_types():
+                    data = self.get_data_type_data(dt)
+                    values = []
+                    for key, value in data.items():
+                        values = list(value.keys())
+                        break
+                    combo_values[dt] = values
             return combo_values
 
         def add_coordinate(data_type, entry, combo, listbox):
@@ -884,10 +979,12 @@ class DatasheetGeneratorApp:
         content_frame = ttk.Frame(tab)
         content_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Dynamically create frames for all data types
-        for data_type in self.get_all_data_types():
-            config = self.get_data_type_config(data_type)
-            short_name = config.get('short_name', data_type.upper())
+        # Create frame for the specific data type (or all if data_type is None for backward compatibility)
+        data_types_to_process = [data_type] if data_type else self.get_all_data_types()
+        
+        for current_data_type in data_types_to_process:
+            config = self.get_data_type_config(current_data_type)
+            short_name = config.get('short_name', current_data_type.upper())
             
             # Create frame for this data type
             data_frame = ttk.LabelFrame(content_frame, text=f"{short_name} Coordinates")
@@ -902,7 +999,7 @@ class DatasheetGeneratorApp:
             label.pack(side="left")
 
             # Combo box
-            combo = ttk.Combobox(controls, values=combo_values.get(data_type, []), state="readonly")
+            combo = ttk.Combobox(controls, values=combo_values.get(current_data_type, []), state="readonly")
             combo.pack(side="left", fill="x", expand=True, padx=5)
 
             # Button frame
@@ -915,14 +1012,14 @@ class DatasheetGeneratorApp:
 
             # Buttons
             ttk.Button(btn_frame, text=f"Add to {short_name}",
-                       command=lambda dt=data_type, e=coord_entry, c=combo, l=listbox: add_coordinate(dt, e, c, l)).pack(side="left", padx=2)
+                       command=lambda dt=current_data_type, e=coord_entry, c=combo, l=listbox: add_coordinate(dt, e, c, l)).pack(side="left", padx=2)
             ttk.Button(btn_frame, text="Remove",
-                       command=lambda dt=data_type, l=listbox: remove_coordinate(dt, l)).pack(side="left", padx=2)
+                       command=lambda dt=current_data_type, l=listbox: remove_coordinate(dt, l)).pack(side="left", padx=2)
             ttk.Button(btn_frame, text="Clear All",
-                       command=lambda dt=data_type, l=listbox: clear_coordinates(dt, l)).pack(side="left", padx=2)
+                       command=lambda dt=current_data_type, l=listbox: clear_coordinates(dt, l)).pack(side="left", padx=2)
             
             # AutoMap button with min score entry
-            def automap_coordinate(dt=data_type, combo_box=combo):                    # Get min score from entry box
+            def automap_coordinate(dt=current_data_type, combo_box=combo):                    # Get min score from entry box
                 min_score = float(min_score_entry.get().strip())
 
                 full_selection = xw.apps.active.selection.address
@@ -962,16 +1059,12 @@ class DatasheetGeneratorApp:
             
             # AutoMap button
             ttk.Button(btn_frame, text="AutoMap",
-                       command=lambda dt=data_type, cb=combo: automap_coordinate(dt, cb)).pack(side="left", padx=2)
+                       command=lambda dt=current_data_type, cb=combo: automap_coordinate(dt, cb)).pack(side="left", padx=2)
 
             # Store references for later use
-            setattr(self, f"{data_type}_combo", combo)
-            setattr(self, f"{data_type}_listbox", listbox)
+            setattr(self, f"{current_data_type}_combo", combo)
+            setattr(self, f"{current_data_type}_listbox", listbox)
 
-        # Transformation button (only show if we have data types)
-        if self.get_all_data_types():
-            xfn_button = ttk.Button(content_frame, text="Transformation\nCode and Key", command=lambda: self.notebook.select(3))
-            xfn_button.pack(side="left", padx=10)
         
         # Semantic mapping status and controls
         semantic_frame = ttk.LabelFrame(tab, text="Semantic Mapping", padding="10")
@@ -1113,149 +1206,6 @@ class DatasheetGeneratorApp:
         # Expose reinitialize method for external calls
         tab.reinitialize = reinitialize
         return tab
-
-    def create_datasheet_tab(self, tab):
-        print("DEBUG: Starting create_datasheet_tab...")
-        fields = [
-            ("Source Sheet Name (Leave blank to only update existing)", "source_sheet_name", ttk.Combobox),
-            ("Datasheet Coordinate", "datasheet_coord", ttk.Entry),
-            ("Datasheet Prefix used to identify sheets names that should be updated and fill DS numbers\n(If blank, we will look for existing tags in all sheets starting from the top tag)\nThis could be problematic if there is a cover sheet we try pulling tags from which might cause issues with accessing sheets that dont exist", "ds_str", ttk.Entry),
-            #("Tag Pattern", "tag_pattern", ttk.Entry),
-            ("Top Tag", "top_tag", ttk.Entry),
-            ("Rows per Sheet", "rows_per_sheet", ttk.Entry)
-        ]
-
-        entries = {}
-        for i, (label, attr, widget_type) in enumerate(fields):
-            # Create a frame for label and help button (for Top Tag only)
-            if attr == "top_tag":
-                label_frame = ttk.Frame(tab)
-                label_frame.grid(row=i, column=0, padx=5, pady=5, sticky="w")
-                
-                ttk.Label(label_frame, text=label).pack(side="left")
-                
-                # Add help button
-                def show_top_tag_help():
-                    help_text = """Top Tag - Key Coordinate
-
-This is the Excel cell coordinate (e.g., A1, I12) where the tag identifier is placed in each datasheet.
-
-WHAT IT DOES:
-• Places the dictionary key (tag identifier) at this coordinate
-• Serves as the anchor point for all tag-related operations
-• Used to identify existing tags when updating sheets
-• Used to place new tags when creating sheets
-• Calculates row offsets for positioning other data
-
-HOW IT WORKS WITH COORDINATE-VALUE DATA:
-The Top Tag and Coordinate-Value Data work together:
-
-1. TOP TAG: Determines WHERE the tag goes
-   - Places the dictionary key (e.g., "TAG-001") at the specified coordinate
-   - Example: If Top Tag = "A1", then "TAG-001" goes in cell A1
-
-2. COORDINATE-VALUE DATA: Determines WHAT data goes where
-   - Contains mapping of coordinates to values for each tag
-   - Example: {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}
-
-COMPLETE PROCESS FLOW:
-1. System reads your data: {"TAG-001": {"B1": "Line 1", "C1": "PID-001"}}
-2. Top Tag places "TAG-001" at the key coordinate (e.g., A1)
-3. Coordinate-Value Data places "Line 1" at B1, "PID-001" at C1, etc.
-
-EXAMPLE WITH DETAILS:
-If Top Tag = "A1" and you have data like:
-{"TAG-001": {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}}
-
-Result in Excel:
-• Cell A1: "TAG-001" (the tag identifier from dictionary key)
-• Cell B1: "Line 1" (from coordinate-value data)
-• Cell C1: "PID-001" (from coordinate-value data)
-• Cell D1: "100.5" (from coordinate-value data)
-
-AUTOMATIC SETTING:
-• The Top Tag is automatically set to the first coordinate you add for the primary data type
-• You can manually change it if needed
-
-IMPORTANT NOTES:
-• The Top Tag is the ANCHOR POINT for all tag operations
-• All other data positioning is calculated relative to this coordinate
-• When updating existing sheets, the system looks for tags at this coordinate
-• When creating new sheets, tags are placed at this coordinate"""
-                    
-                    help_window = tk.Toplevel(tab)
-                    help_window.title("Top Tag Help")
-                    help_window.geometry("500x400")
-                    help_window.transient(tab)
-                    help_window.grab_set()
-                    
-                    # Create scrolled text widget
-                    text_widget = scrolledtext.ScrolledText(help_window, wrap=tk.WORD, padx=10, pady=10)
-                    text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-                    text_widget.insert(tk.END, help_text)
-                    text_widget.configure(state='disabled')
-                    
-                    # Close button
-                    ttk.Button(help_window, text="Close", command=help_window.destroy).pack(pady=10)
-                
-                help_btn = ttk.Button(label_frame, text="?", width=3, command=show_top_tag_help)
-                help_btn.pack(side="left", padx=(5, 0))
-            else:
-                ttk.Label(tab, text=label).grid(row=i, column=0, padx=5, pady=5, sticky="w")
-            
-            w = widget_type(tab)
-            w.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
-            if hasattr(self, attr):
-                w.insert(0, getattr(self, attr))
-            if widget_type == ttk.Combobox:
-                w['values'] = self.get_sheet_names()
-            entries[attr] = w
-
-        # Add Sig Figs and Tolerance fields
-        i = len(fields) # Get the next row index
-        ttk.Label(tab, text="Significant Figures for Rounding").grid(row=i, column=0, padx=5, pady=5, sticky="w")
-        sig_figs_entry = ttk.Entry(tab)
-        sig_figs_entry.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
-        sig_figs_entry.insert(0, getattr(self, 'sig_figs'))
-        entries['sig_figs'] = sig_figs_entry
-
-        i += 1
-        ttk.Label(tab, text="Rounding Tolerance (e.g., 1e-2)").grid(row=i, column=0, padx=5, pady=5, sticky="w")
-        tolerance_entry = ttk.Entry(tab)
-        tolerance_entry.grid(row=i, column=1, padx=5, pady=5, sticky="ew")
-        tolerance_entry.insert(0, getattr(self, 'rounding_tolerance'))
-        entries['rounding_tolerance'] = tolerance_entry
-
-        def save_datasheet_settings():
-            for attr, entry in entries.items():
-                if attr == 'rows_per_sheet':
-                    try:
-                        setattr(self, attr, int(entry.get()))
-                    except ValueError:
-                        setattr(self, attr, 0)
-                elif attr == 'sig_figs': # Handle sig_figs
-                    try:
-                        setattr(self, attr, int(entry.get()))
-                    except ValueError:
-                        setattr(self, attr, 4) # Default if invalid
-                        entry.delete(0, tk.END)
-                        entry.insert(0, '4')
-                        messagebox.showwarning("Invalid Input", "Significant figures must be an integer. Using default value 4.")
-                elif attr == 'rounding_tolerance': # Handle rounding_tolerance
-                    try:
-                        setattr(self, attr, float(entry.get()))
-                    except ValueError:
-                        setattr(self, attr, 1e-2) # Default if invalid
-                        entry.delete(0, tk.END)
-                        entry.insert(0, '1e-2')
-                        messagebox.showwarning("Invalid Input", "Rounding tolerance must be a number. Using default value 1e-2.")
-                else:
-                    setattr(self, attr, entry.get())
-            print("Datasheet settings saved.") # Add confirmation
-
-        save_btn = ttk.Button(tab, text="Save", command=save_datasheet_settings)
-        save_btn.grid(row=len(fields) + 2, column=0, columnspan=2, pady=10) # Adjust row index for the button
-        tab.grid_columnconfigure(1, weight=1)
 
     def create_filters_tab(self, tab):
         print("DEBUG: Starting create_filters_tab...")
@@ -1436,84 +1386,233 @@ IMPORTANT NOTES:
         ttk.Button(tab, text="Save", command=save_transform).pack(pady=5)
 
     def refresh_tab_content(self):
+        # Refresh all configuration tabs within each data source tab
+        for data_type in self.get_all_data_types():
+            config_notebook_name = f'{data_type}_config_notebook'
+            if hasattr(self, config_notebook_name):
+                config_notebook = getattr(self, config_notebook_name)
         # Recreate all tabs with updated data
-        for tab in self.notebook.winfo_children():
+        for tab in config_notebook.winfo_children():
             tab.destroy()
 
-        coordinates_tab = ttk.Frame(self.notebook)
-        datasheet_tab = ttk.Frame(self.notebook)
-        filters_tab = ttk.Frame(self.notebook)
-        transform_tab = ttk.Frame(self.notebook)
+        coordinates_tab = ttk.Frame(config_notebook)
+        filters_tab = ttk.Frame(config_notebook)
+        transform_tab = ttk.Frame(config_notebook)
 
-        self.notebook.add(coordinates_tab, text='Coordinates')
-        self.notebook.add(datasheet_tab, text='Datasheet')
-        self.notebook.add(filters_tab, text='Filters')
-        self.notebook.add(transform_tab, text='Transform')
+        config_notebook.add(coordinates_tab, text='Coordinates')
+        config_notebook.add(filters_tab, text='Filters')
+        config_notebook.add(transform_tab, text='Transform')
 
-        self.create_coordinates_tab(coordinates_tab)
-        self.create_datasheet_tab(datasheet_tab)
+        self.create_coordinates_tab(coordinates_tab, data_type)
         self.create_filters_tab(filters_tab)
         self.create_transform_tab(transform_tab)
+
+    def open_datasheet_config_window(self):
+        """Open a new window with datasheet configuration options"""
+        # Create new window
+        config_window = tk.Toplevel(self.root)
+        config_window.title("Datasheet Configuration")
+        config_window.geometry("600x500")
+        config_window.transient(self.root)
+        config_window.grab_set()
+        
+        # Create main frame with padding
+        main_frame = ttk.Frame(config_window, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create scrollable frame
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Create the datasheet configuration content in the scrollable frame
+        self.create_datasheet_config_content(scrollable_frame, config_window)
+        
+        # Center the window
+        config_window.update_idletasks()
+        x = (config_window.winfo_screenwidth() // 2) - (config_window.winfo_width() // 2)
+        y = (config_window.winfo_screenheight() // 2) - (config_window.winfo_height() // 2)
+        config_window.geometry(f"+{x}+{y}")
+
+    def create_datasheet_config_content(self, parent, window):
+        """Create the datasheet configuration content for the popup window"""
+        # Import scrolledtext for help window
+        import tkinter.scrolledtext as scrolledtext
+        
+        fields = [
+            ("Source Sheet Name (Leave blank to only update existing)", "source_sheet_name", ttk.Combobox),
+            ("Datasheet Coordinate", "datasheet_coord", ttk.Entry),
+            ("Datasheet Prefix used to identify sheets names that should be updated and fill DS numbers\n(If blank, we will look for existing tags in all sheets starting from the top tag)\nThis could be problematic if there is a cover sheet we try pulling tags from which might cause issues with accessing sheets that dont exist", "ds_str", ttk.Entry),
+            ("Top Tag", "top_tag", ttk.Entry),
+            ("Rows per Sheet", "rows_per_sheet", ttk.Entry)
+        ]
+
+        entries = {}
+        for i, (label, attr, widget_type) in enumerate(fields):
+            # Create a frame for label and help button (for Top Tag only)
+            if attr == "top_tag":
+                label_frame = ttk.Frame(parent)
+                label_frame.pack(fill="x", padx=5, pady=5)
+                
+                ttk.Label(label_frame, text=label).pack(side="left")
+                
+                # Add help button
+                def show_top_tag_help():
+                    help_text = """Top Tag - Key Coordinate
+
+This is the Excel cell coordinate (e.g., A1, I12) where the tag identifier is placed in each datasheet.
+
+WHAT IT DOES:
+• Places the dictionary key (tag identifier) at this coordinate
+• Serves as the anchor point for all tag-related operations
+• Used to identify existing tags when updating sheets
+• Used to place new tags when creating sheets
+• Calculates row offsets for positioning other data
+
+HOW IT WORKS WITH COORDINATE-VALUE DATA:
+The Top Tag and Coordinate-Value Data work together:
+
+1. TOP TAG: Determines WHERE the tag goes
+   - Places the dictionary key (e.g., "TAG-001") at the specified coordinate
+   - Example: If Top Tag = "A1", then "TAG-001" goes in cell A1
+
+2. COORDINATE-VALUE DATA: Determines WHAT data goes where
+   - Contains mapping of coordinates to values for each tag
+   - Example: {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}
+
+COMPLETE PROCESS FLOW:
+1. System reads your data: {"TAG-001": {"B1": "Line 1", "C1": "PID-001"}}
+2. Top Tag places "TAG-001" at the key coordinate (e.g., A1)
+3. Coordinate-Value Data places "Line 1" at B1, "PID-001" at C1, etc.
+
+EXAMPLE WITH DETAILS:
+If Top Tag = "A1" and you have data like:
+{"TAG-001": {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}}
+
+Result in Excel:
+• Cell A1: "TAG-001" (the tag identifier from dictionary key)
+• Cell B1: "Line 1" (from coordinate-value data)
+• Cell C1: "PID-001" (from coordinate-value data)
+• Cell D1: "100.5" (from coordinate-value data)
+
+AUTOMATIC SETTING:
+• The Top Tag is automatically set to the first coordinate you add for the primary data type
+• You can manually change it if needed
+
+IMPORTANT NOTES:
+• The Top Tag is the ANCHOR POINT for all tag operations
+• All other data positioning is calculated relative to this coordinate
+• When updating existing sheets, the system looks for tags at this coordinate
+• When creating new sheets, tags are placed at this coordinate"""
+                    
+                    help_window = tk.Toplevel(window)
+                    help_window.title("Top Tag Help")
+                    help_window.geometry("500x400")
+                    help_window.transient(window)
+                    help_window.grab_set()
+                    
+                    # Create scrolled text widget
+                    text_widget = scrolledtext.ScrolledText(help_window, wrap=tk.WORD, padx=10, pady=10)
+                    text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+                    text_widget.insert(tk.END, help_text)
+                    text_widget.configure(state='disabled')
+                    
+                    # Close button
+                    ttk.Button(help_window, text="Close", command=help_window.destroy).pack(pady=10)
+                
+                help_btn = ttk.Button(label_frame, text="?", width=3, command=show_top_tag_help)
+                help_btn.pack(side="left", padx=(5, 0))
+            else:
+                ttk.Label(parent, text=label).pack(anchor="w", padx=5, pady=(5, 0))
+            
+            w = widget_type(parent)
+            w.pack(fill="x", padx=5, pady=(0, 5))
+            
+            if widget_type == ttk.Combobox:
+                # Get sheet names from the datasheet file
+                sheet_names = self.get_sheet_names()
+                w['values'] = sheet_names
+                # Set current value if it exists, otherwise use first sheet name
+                current_value = getattr(self, attr, '')
+                if current_value and current_value in sheet_names:
+                    w.set(current_value)
+                elif sheet_names:
+                    w.set(sheet_names[0])
+            else:
+                # For regular entry widgets, insert current value
+                if hasattr(self, attr):
+                    w.insert(0, getattr(self, attr))
+            
+            entries[attr] = w
+
+        # Add Sig Figs and Tolerance fields
+        ttk.Label(parent, text="Significant Figures for Rounding").pack(anchor="w", padx=5, pady=(5, 0))
+        sig_figs_entry = ttk.Entry(parent)
+        sig_figs_entry.pack(fill="x", padx=5, pady=(0, 5))
+        sig_figs_entry.insert(0, getattr(self, 'sig_figs'))
+        entries['sig_figs'] = sig_figs_entry
+
+        ttk.Label(parent, text="Rounding Tolerance (e.g., 1e-2)").pack(anchor="w", padx=5, pady=(5, 0))
+        tolerance_entry = ttk.Entry(parent)
+        tolerance_entry.pack(fill="x", padx=5, pady=(0, 5))
+        tolerance_entry.insert(0, getattr(self, 'rounding_tolerance'))
+        entries['rounding_tolerance'] = tolerance_entry
+
+        def save_datasheet_settings():
+            for attr, entry in entries.items():
+                if attr == 'rows_per_sheet':
+                    try:
+                        setattr(self, attr, int(entry.get()))
+                    except ValueError:
+                        setattr(self, attr, 0)
+                elif attr == 'sig_figs': # Handle sig_figs
+                    try:
+                        setattr(self, attr, int(entry.get()))
+                    except ValueError:
+                        setattr(self, attr, 4) # Default if invalid
+                        entry.delete(0, tk.END)
+                        entry.insert(0, '4')
+                        messagebox.showwarning("Invalid Input", "Significant figures must be an integer. Using default value 4.")
+                elif attr == 'rounding_tolerance': # Handle rounding_tolerance
+                    try:
+                        setattr(self, attr, float(entry.get()))
+                    except ValueError:
+                        setattr(self, attr, 1e-2) # Default if invalid
+                        entry.delete(0, tk.END)
+                        entry.insert(0, '1e-2')
+                        messagebox.showwarning("Invalid Input", "Rounding tolerance must be a number. Using default value 1e-2.")
+                else:
+                    setattr(self, attr, entry.get())
+            print("Datasheet settings saved.")
+            messagebox.showinfo("Success", "Datasheet configuration saved successfully!")
+            window.destroy()
+
+        # Button frame
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(fill="x", padx=5, pady=10)
+        
+        save_btn = ttk.Button(button_frame, text="Save", command=save_datasheet_settings)
+        save_btn.pack(side="left", padx=(0, 5))
+        
+        cancel_btn = ttk.Button(button_frame, text="Cancel", command=window.destroy)
+        cancel_btn.pack(side="left")
 
     # endregion
 
     # region Configuration Windows
 
-    def get_xkey(self):
-        xkey_window = tk.Toplevel(self.root)
-        xkey_window.title("Configure translation_lambda")
-
-        frame1 = tk.Frame(xkey_window)
-        frame1.pack(fill="x", pady=5, padx=5)
-        frame2 = tk.Frame(xkey_window, pady=5, padx=5)
-        frame2.pack(fill="x")
-
-        # Label for "Index Source Key"
-        td_label = tk.Label(frame1, text="Index Source Key: ")
-        td_label.pack(side='left', padx=5)
-
-        # Dropdown options for ttk combobox
-        td_combo_values = []
-        # Example values for the combo box
-        for key, value in self.td.items():
-            td_combo_values = list(value.keys())
-            print(list(td_combo_values))
-            break
-
-        # Creating the ttk combobox
-        td_combo = ttk.Combobox(frame1, values=td_combo_values)
-        td_combo.insert(0, self.td_xkey)
-        td_combo.pack(side='left', fill="x", expand=True)
-
-        # Label for "'x' is the source. Code: "
-        code_label = tk.Label(frame2, text="PC key, x = Index Value: ")
-        code_label.pack(side='left', padx=5)
-
-        # Entry box for transformation code
-        transformation_entry = tk.Entry(frame2)
-        transformation_entry.insert(0, self.transformation_code)
-        transformation_entry.pack(side='left', fill="x", expand=True)
-
-        # Save button
-        def save_values():
-            # Get the selected value from the Combobox
-            selected_td_xkey = td_combo.get()
-            # Update self.td_xkey with the selected value
-            self.td_xkey = selected_td_xkey
-
-            # Get the text entered in the Entry widget
-            entered_transformation_code = transformation_entry.get()
-            # Update self.transformation_code with the entered text
-            self.transformation_code = entered_transformation_code
-
-            # Close the Toplevel window
-            xkey_window.destroy()
-
-        save_button = tk.Button(xkey_window, text="Save", command=save_values)
-        save_button.pack(expand=True)
-
-        # Run the tkinter main loop
-        xkey_window.mainloop()
 
     def set_tag_filters(self):
         view_window = tk.Toplevel(self.root)
@@ -1583,34 +1682,6 @@ IMPORTANT NOTES:
 
     # region Data Generation and Processing
 
-    def generate_process_conditions(self):
-        # Pass the tolerance value
-        pc_data = generate_dictionary_from_xlsx(self.get_data_type_path('pc'), self.get_data_type_headers('pc'),
-                                              parent=self.root, selected_sheets=self.get_data_type_selected_sheets('pc'),
-                                              max_empty_allowed=self.blank_cell_tolerance)
-        if pc_data is not None: # Check if generation was successful (not cancelled)
-             self.set_data_type_data('pc', pc_data)
-             show_nested_dict_analysis(pc_data)
-             print("Generated Process Conditions")
-             self.refresh_tab_content()
-        else:
-             print("Process Conditions generation cancelled or failed.")
-
-    def generate_tag_data(self):
-        print("Generating Tag Data")
-        print(self.get_data_type_path('td'))
-        print(self.get_data_type_headers('td'))
-        # Pass the tolerance value
-        td_data = generate_dictionary_from_xlsx(self.get_data_type_path('td'), self.get_data_type_headers('td'),
-                                              parent=self.root, selected_sheets=self.get_data_type_selected_sheets('td'),
-                                              max_empty_allowed=self.blank_cell_tolerance)
-        if td_data is not None: # Check if generation was successful
-             self.set_data_type_data('td', td_data)
-             show_nested_dict_analysis(td_data)
-             print("Generated Tag Data")
-             self.refresh_tab_content()
-        else:
-             print("Tag Data generation cancelled or failed.")
 
     def assign_value_coordinate_to_tag(self):
         """Legacy method - now calls the dynamic version"""
@@ -1703,9 +1774,15 @@ IMPORTANT NOTES:
                     print(f"  Error processing combination {coord}: {e}")
                     continue
         
-        # Process TD data (assuming TD is the primary data type for tags)
-        td_data = self.get_data_type_data('td')
-        for tag in td_data:
+        # Get the primary data type (explicitly configured) - truly dynamic
+        primary_data_type = self.get_primary_data_type()
+        primary_data = self.get_data_type_data(primary_data_type)
+        
+        if not primary_data:
+            print(f"No data available for primary data type: {primary_data_type}")
+            return
+            
+        for tag in primary_data:
             if tag:
                 # filter out
                 continue_flag = False
@@ -1716,59 +1793,30 @@ IMPORTANT NOTES:
                     acceptable_values = [value.strip() for value in filter_key.split(',')]
 
                     # If the tag's value for this header isn't in our acceptable values, filter it out
-                    if td_data[tag][header] not in acceptable_values:
+                    if primary_data[tag][header] not in acceptable_values:
                         continue_flag = True
                         break
 
                 if continue_flag:
                     continue
 
-                # Process coordinates for all data types
+                # Process coordinates for the primary data type only
                 data = {}
                 
-                # Process TD coordinates first
-                td_coordinate_values = self.get_data_type_coordinate_values('td')
-                for coordinate, value in td_coordinate_values.items():
-                    print(f'tag {tag}, value {value}, coord {coordinate}')
-                    raw_value = td_data[tag].get(value) # Use .get() for safety
+                # Process only the primary data type coordinates
+                primary_data_type = self.get_primary_data_type()
+                data_type_data = self.get_data_type_data(primary_data_type)
+                coordinate_values = self.get_data_type_coordinate_values(primary_data_type)
+                
+                for coordinate, value in coordinate_values.items():
+                    print(f'{primary_data_type} tag {tag}, value {value}, coord {coordinate}')
+                    raw_value = data_type_data[tag].get(value) # Use .get() for safety
                     processed_value = process_coordinate_value(coordinate, raw_value)
                     data[coordinate] = processed_value
                     if processed_value is None:
-                        print(f"  Warning: Key '{value}' not found in td for tag '{tag}'. Skipping coordinate '{coordinate}'.")
+                        print(f"  Warning: Key '{value}' not found in {primary_data_type} for tag '{tag}'. Skipping coordinate '{coordinate}'.")
 
-                # Apply combinations to TD data
-                apply_combinations(data)
-                
-                # Process PC coordinates
-                try:
-                    interface = translate(td_data[tag][self.td_xkey], self.transformation_code)
-                    print(f'tag: {tag}, td_xkey: {self.td_xkey}, interface: {interface}')
-                    
-                    pc_data = self.get_data_type_data('pc')
-                    pc_coordinate_values = self.get_data_type_coordinate_values('pc')
-                    print("length ", len(pc_coordinate_values))
-
-                    for coordinate, value in pc_coordinate_values.items():
-                        print("value ", value)
-                        try:
-                            raw_value = pc_data[interface].get(value) # Use .get() for safety
-                            processed_value = process_coordinate_value(coordinate, raw_value)
-                            data[coordinate] = processed_value
-                            if processed_value is None:
-                                print(f"  Warning: Key '{value}' not found in pc for interface '{interface}'. Skipping coordinate '{coordinate}'.")
-                        except KeyError:
-                             print(f"  Warning: Interface key '{interface}' not found in pc. Skipping PC coordinate '{coordinate}'.")
-                             data[coordinate] = None # Or handle as needed
-                        except Exception as e:
-                            print(f'Error processing PC coordinate {coordinate} for interface {interface}: {e}')
-                            data[coordinate] = None # Or handle as needed
-
-                except KeyError as e:
-                    print(f'xkey pc interface fail: Key \'{e}\' not found for tag \'{tag}\'.')
-                except Exception as e:
-                    print(f'xkey pc interface fail for tag {tag}: {e}')
-
-                # Apply combinations to all data
+                # Apply combinations to the data
                 apply_combinations(data)
 
                 self.tag_cell_values[tag] = data
@@ -1780,8 +1828,8 @@ IMPORTANT NOTES:
         print("Generating Coordinate-Value Data (Dynamic)")
         self.tag_cell_values = {}
         
-        # Get the primary data type (first one defined)
-        primary_data_type = list(self.get_all_data_types())[0]
+        # Get the primary data type (explicitly configured)
+        primary_data_type = self.get_primary_data_type()
         primary_data = self.get_data_type_data(primary_data_type)
         
         if not primary_data:
@@ -2030,34 +2078,8 @@ IMPORTANT NOTES:
         except Exception as e:
             print(f"Error occurred while saving settings: {e}")
 
-    def load_td_from_datasheet(self):
-        def set_td(td):
-            self.set_data_type_data('td', td)
-            self.refresh_tab_content()
 
-        app_window = tk.Toplevel(root)
-        DatasheetExtractor(app_window, callback=set_td)
 
-    def load_pc_from_datasheet(self):
-        def set_pc(pc):
-            self.set_data_type_data('pc', pc)
-            self.refresh_tab_content()
-
-        app_window = tk.Toplevel(root)
-        DatasheetExtractor(app_window, callback=set_pc)
-
-    def load_td_from_json(self):
-        # use tkinter to ask for the json file path
-        # use load_dict_from_json(file_path) to set self.td
-        # Ask the user to select a JSON file
-        file_path = filedialog.askopenfilename(title="Select JSON file", filetypes=[("JSON files", "*.json")])
-
-        # Check if a file was selected
-        if file_path:
-            # Load the JSON file using load_dict_from_json
-            td_data = load_dict_from_json(file_path)
-            self.set_data_type_data('td', td_data)
-            self.refresh_tab_content()
     
     def load_data_type_from_datasheet(self, data_type):
         """Load data for any data type from datasheet"""
@@ -2113,10 +2135,10 @@ IMPORTANT NOTES:
         print(f"Viewing {text}")
 
         if text == "Coordinate-Value Data":
-            # open a new tkinter popup window with a scroll bar showing all the key-value pairs in the self.pc dictionary
+            # open a new tkinter popup window with a scroll bar showing all the coordinate-value pairs
             self.display_coordinate_values()
         elif text == "Datasheets":
-            # open a new tkinter popup window with a scroll bar showing all the key-value pairs in the self.pc dictionary
+            # open the datasheets file
             os.startfile(self.datasheets)
         else:
             # Check if it's a data type
@@ -2285,43 +2307,7 @@ IMPORTANT NOTES:
 
         scrolled_text.configure(state='disabled')  # Make read-only
 
-    def display_process_conditions(self):
-        # Create a new window
-        view_window = tk.Toplevel(self.root)
-        view_window.title("Process Conditions")
 
-        # Create a scrolled text widget to display the process conditions
-        scrolled_text = scrolledtext.ScrolledText(view_window, width=40, height=20)
-        scrolled_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)  # Fill and expand to fill the window
-
-        # Display the process conditions content in the scrolled text widget
-        pc_data = self.get_data_type_data('pc')
-        if pc_data:
-            for key, value in pc_data.items():
-                scrolled_text.insert(tk.END, f"{key}: {value}\n\n")
-        else:
-            scrolled_text.insert(tk.END, "No process conditions data available.")
-
-        scrolled_text.configure(state='disabled')  # Make
-
-    def display_tag_data(self):
-        # Create a new window
-        view_window = tk.Toplevel(self.root)
-        view_window.title("Instrument Index Tag Data")
-
-        # Create a scrolled text widget to display the process conditions
-        scrolled_text = scrolledtext.ScrolledText(view_window, width=40, height=20)
-        scrolled_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)  # Fill and expand to fill the window
-
-        # Display the process conditions content in the scrolled text widget
-        td_data = self.get_data_type_data('td')
-        if td_data:
-            for key, value in td_data.items():
-                scrolled_text.insert(tk.END, f"{key}: {value}\n\n")
-        else:
-            scrolled_text.insert(tk.END, "No tag data available.")
-
-        scrolled_text.configure(state='disabled')  # Make
 
     def display_coordinate_values(self):
 
@@ -2534,15 +2520,12 @@ The datasheets have been generated and are ready for use."""
     def configure(self, text):
         print(f"Configure {text}")
 
-        if text == 'Datasheets':
-             self.configure_ds() # Keep existing Datasheet config separate
+        # Find the data type by name
+        data_type = self.get_data_type_by_name(text)
+        if data_type:
+            self.configure_data_type(data_type)
         else:
-            # Find the data type by name
-            data_type = self.get_data_type_by_name(text)
-            if data_type:
-                self.configure_data_type(data_type)
-            else:
-                print(f"Unknown configuration type: {text}")
+            print(f"Unknown configuration type: {text}")
     
     def get_data_type_by_name(self, name):
         """Get data type key by its display name"""
@@ -2575,10 +2558,6 @@ The datasheets have been generated and are ready for use."""
             self.blank_cell_tolerance = result["tolerance"]
             print(f"{name} configuration updated.")
 
-    def update_pc_keys(self):
-        code = askstring("Enter transformation code for keys in dictionary", "Enter transformation code",
-                         initialvalue='"-".join(x.split("-")[-2:])')
-        self.pc = transform_dictionary(self.pc, code)
 
     def configure_ds(self):
         self.init_excel()
@@ -2930,27 +2909,25 @@ The datasheets have been generated and are ready for use."""
 
         coord = self.selected_coord_for_context
         
-        # Determine which coordinate type this is (td or pc)
+        # Determine which data type this coordinate belongs to
         coord_type = None
         current_source_key = None
         available_keys = []
         
-        if coord in self.td_coordinate_values:
-            coord_type = "td"
-            current_source_key = self.td_coordinate_values[coord]
-            # Get available TD keys
-            for key, value in self.td.items():
-                available_keys = list(value.keys())
+        for data_type in self.get_all_data_types():
+            coordinate_values = self.get_data_type_coordinate_values(data_type)
+            if coord in coordinate_values:
+                coord_type = data_type
+                current_source_key = coordinate_values[coord]
+                # Get available keys for this data type
+                data = self.get_data_type_data(data_type)
+                for key, value in data.items():
+                    available_keys = list(value.keys())
+                    break
                 break
-        elif coord in self.pc_coordinate_values:
-            coord_type = "pc"
-            current_source_key = self.pc_coordinate_values[coord]
-            # Get available PC keys
-            for key, value in self.pc.items():
-                available_keys = list(value.keys())
-                break
-        else:
-            print(f"Coordinate {coord} not found in either TD or PC coordinate values")
+        
+        if coord_type is None:
+            print(f"Coordinate {coord} not found in any data type coordinate values")
             return
 
         dialog = Toplevel(self.root)
@@ -3533,3 +3510,4 @@ if __name__ == "__main__":
     print("DEBUG: Starting main event loop...")
     root.mainloop()
     print("DEBUG: Main event loop ended.")
+
