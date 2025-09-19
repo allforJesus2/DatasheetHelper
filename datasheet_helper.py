@@ -566,6 +566,7 @@ class DatasheetGeneratorApp:
             ("Excel Macros", self.open_excel_macros_window),
             ("Excel Regex Search App", self.open_excel_regex_search_app),
             ("Semantic Matcher", self.open_semantic_matcher),
+            ("Release Excel", self.release_excel_connection),
             ("Stop Datasheet Generation", self.set_halt_flag)
         ]
         
@@ -1118,7 +1119,7 @@ class DatasheetGeneratorApp:
         fields = [
             ("Source Sheet Name (Leave blank to only update existing)", "source_sheet_name", ttk.Combobox),
             ("Datasheet Coordinate", "datasheet_coord", ttk.Entry),
-            ("Datasheet Prefix used to identify sheets that should be updated and fill DS numbers\n(If blank, we will look for existing tags in all sheets starting from the top tag)\nThis could be problematic if there is a cover sheet we try pulling tags from which might cause issues with accessing sheets that dont exist", "ds_str", ttk.Entry),
+            ("Datasheet Prefix used to identify sheets names that should be updated and fill DS numbers\n(If blank, we will look for existing tags in all sheets starting from the top tag)\nThis could be problematic if there is a cover sheet we try pulling tags from which might cause issues with accessing sheets that dont exist", "ds_str", ttk.Entry),
             #("Tag Pattern", "tag_pattern", ttk.Entry),
             ("Top Tag", "top_tag", ttk.Entry),
             ("Rows per Sheet", "rows_per_sheet", ttk.Entry)
@@ -1274,6 +1275,14 @@ IMPORTANT NOTES:
             td_combo_values = list(value.keys())
             break
 
+        def get_filter_values_for_header(header):
+            """Get unique values for a specific header from TD data"""
+            unique_values = set()
+            for key, value in td_data.items():
+                if header in value and value[header] is not None:
+                    unique_values.add(str(value[header]))
+            return sorted(list(unique_values))
+
         def add_filter_row(name='', filter_value=''):
             new_row = len(filters_entries) + 1
             name_label = tk.Label(content_frame, text=f"Index Key {new_row}:")
@@ -1284,9 +1293,24 @@ IMPORTANT NOTES:
 
             filter_label = tk.Label(content_frame, text=f"Filter {new_row}:")
             filter_label.grid(row=new_row, column=2)
-            filter_entry = tk.Entry(content_frame)
+            
+            # Get filter values for the selected header
+            filter_values = get_filter_values_for_header(name) if name else []
+            filter_entry = ttk.Combobox(content_frame, values=filter_values)
             filter_entry.grid(row=new_row, column=3)
-            filter_entry.insert(0, filter_value)
+            filter_entry.set(filter_value)
+
+            # Update filter values when header changes
+            def on_header_change(event=None):
+                selected_header = name_entry.get()
+                new_filter_values = get_filter_values_for_header(selected_header)
+                filter_entry['values'] = new_filter_values
+                # Clear current selection if it's not valid for new header
+                if filter_entry.get() not in new_filter_values:
+                    filter_entry.set('')
+            
+            name_entry.bind('<<ComboboxSelected>>', on_header_change)
+            name_entry.bind('<KeyRelease>', on_header_change)
 
             filters_entries.append((name_entry, filter_entry))
 
@@ -1889,6 +1913,9 @@ IMPORTANT NOTES:
             else:
                 print("DONE")
                 self.update_status("Process completed successfully", "green")
+                
+                # Generate and show detailed report
+                self.show_generation_report()
         except Exception as e:
             print(f"Excel connection error: {e}")
             self.update_status("Error occurred", "red")
@@ -2195,9 +2222,55 @@ IMPORTANT NOTES:
             # Refresh the display
             refresh_display()
 
+        def paste_from_clipboard():
+            """Paste JSON data from clipboard and overwrite current data"""
+            try:
+                # Get clipboard content
+                clipboard_content = self.root.clipboard_get()
+                
+                # Try to parse as JSON
+                pasted_data = json.loads(clipboard_content)
+                
+                # Validate that it's a dictionary
+                if not isinstance(pasted_data, dict):
+                    tk.messagebox.showerror("Invalid Format", 
+                                          "Clipboard content must be a JSON object (dictionary).")
+                    return
+                
+                # Confirm overwrite
+                result = tk.messagebox.askyesno("Confirm Overwrite", 
+                                              f"This will overwrite all current {name} data with the clipboard content.\n\n"
+                                              f"Found {len(pasted_data)} entries in clipboard.\n\n"
+                                              "Do you want to continue?")
+                
+                if result:
+                    # Update the data
+                    self.set_data_type_data(data_type, pasted_data)
+                    
+                    # Show success message
+                    tk.messagebox.showinfo("Paste Complete", 
+                                         f"Successfully pasted {len(pasted_data)} entries from clipboard.")
+                    
+                    # Refresh the display
+                    refresh_display()
+                    
+            except tk.TclError:
+                tk.messagebox.showerror("Clipboard Error", 
+                                      "No content found in clipboard.")
+            except json.JSONDecodeError as e:
+                tk.messagebox.showerror("Invalid JSON", 
+                                      f"Clipboard content is not valid JSON:\n{str(e)}")
+            except Exception as e:
+                tk.messagebox.showerror("Error", 
+                                      f"An error occurred while pasting from clipboard:\n{str(e)}")
+
         # Add Split Keys button
         split_button = tk.Button(button_frame, text="Split Keys", command=split_keys)
         split_button.pack(side=tk.LEFT, padx=5)
+        
+        # Add Paste from Clipboard button
+        paste_button = tk.Button(button_frame, text="Paste from Clipboard", command=paste_from_clipboard)
+        paste_button.pack(side=tk.LEFT, padx=5)
 
         # Create a scrolled text widget to display the data
         scrolled_text = scrolledtext.ScrolledText(view_window, width=40, height=20)
@@ -2297,6 +2370,53 @@ IMPORTANT NOTES:
     def save_and_close_workbook(self):
         """Save and close the current workbook"""
         self.excel_mgr.close_workbook()
+
+    def release_excel_connection(self):
+        """Release the xlwings connection to Excel, allowing user to save independently"""
+        try:
+            if self.excel_mgr.wb or self.excel_mgr.app:
+                # Release the connection but keep Excel open
+                self.excel_mgr.release_connection()
+                tk.messagebox.showinfo("Excel Released", 
+                                     "xlwings connection has been released. The workbook remains open in Excel and you can now save it independently.")
+            else:
+                tk.messagebox.showinfo("No Connection", 
+                                     "No Excel connection is currently active.")
+        except Exception as e:
+            tk.messagebox.showerror("Error", 
+                                  f"Error releasing Excel connection: {str(e)}")
+
+    def show_generation_report(self):
+        """Show a detailed report of the datasheet generation process"""
+        try:
+            # Count the number of sheets created/updated
+            num_sheets = len(self.new_sheets) if self.new_sheets else 0
+            
+            # Get additional information for the report
+            source_sheet = self.source_sheet_name if hasattr(self, 'source_sheet_name') else "Unknown"
+            datasheet_prefix = self.ds_str if hasattr(self, 'ds_str') else "Unknown"
+            rows_per_sheet = self.rows_per_sheet if hasattr(self, 'rows_per_sheet') else "Unknown"
+            
+            # Create the report message
+            report_message = f"""Datasheet Generation Complete!
+
+📊 Generation Summary:
+• Source Sheet: {source_sheet}
+• Datasheet Prefix: {datasheet_prefix}
+• Sheets Created/Updated: {num_sheets}
+• Rows per Sheet: {rows_per_sheet}
+
+✅ Process completed successfully!
+The datasheets have been generated and are ready for use."""
+            
+            # Show the report in a message box
+            tk.messagebox.showinfo("Generation Report", report_message)
+            
+        except Exception as e:
+            # Fallback to a simple success message if there's an error
+            tk.messagebox.showinfo("Generation Complete", 
+                                 "Datasheet generation completed successfully!")
+            print(f"Error creating detailed report: {e}")
 
     def delete_added_sheets(self):
         if self.excel_mgr.wb:

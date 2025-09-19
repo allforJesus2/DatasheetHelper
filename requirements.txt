@@ -5,3 +5,6 @@ chromadb
 pandas
 openpyxl
 nltk
+reportlab
+pillow
+pywin32

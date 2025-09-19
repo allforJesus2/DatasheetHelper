@@ -397,12 +397,140 @@ def get_unique_sheet_name(datasheet, ds_prefix, sheet_number):
 
     return name
 
-def update_cell_xlwings(sheet, cell_address, value):
+def apply_character_coloring(sheet, cell_address, old_text, new_text):
+    """Apply character-level color coding to show changes using difflib"""
+    try:
+        import difflib
+        
+        # Get the cell
+        cell = sheet.range(cell_address)
+        
+        # Check if cell is part of a merged range
+        if cell.api.MergeCells:
+            # Get the merged range address
+            merged_range_address = cell.api.MergeArea.Address
+            # Use the top-left cell of the merged range
+            cell = sheet.range(merged_range_address.split(':')[0])
+        
+        # Use difflib to find differences
+        matcher = difflib.SequenceMatcher(None, old_text, new_text)
+        
+        # Clear any existing formatting
+        try:
+            cell.api.Font.Color = (0, 0, 0)  # Reset to black
+        except:
+            pass
+        
+        # Apply character-level formatting
+        char_index = 0
+        
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                # Same text - keep black
+                char_index += (i2 - i1)
+            elif tag == 'replace':
+                # Replaced text - color the new text red
+                start_pos = char_index
+                end_pos = char_index + (j2 - j1)
+                
+                try:
+                    # Color the new text red
+                    if end_pos > start_pos:
+                        cell.characters[start_pos:end_pos].font.color = (255, 0, 0)  # Red
+                except Exception as e:
+                    print(f"Error coloring replaced text: {e}")
+                
+                char_index += (j2 - j1)
+            elif tag == 'delete':
+                # Deleted text - we can't color it since it's gone
+                pass
+            elif tag == 'insert':
+                # Inserted text - color it red
+                start_pos = char_index
+                end_pos = char_index + (j2 - j1)
+                
+                try:
+                    # Color the inserted text red
+                    if end_pos > start_pos:
+                        cell.characters[start_pos:end_pos].font.color = (255, 0, 0)  # Red
+                except Exception as e:
+                    print(f"Error coloring inserted text: {e}")
+                
+                char_index += (j2 - j1)
+        
+    except Exception as e:
+        print(f"Error applying character coloring: {e}")
+        # Fallback: just color the entire cell red if there are changes
+        try:
+            if old_text != new_text:
+                cell.api.Font.Color = (255, 0, 0)  # Red
+        except:
+            pass
+
+def apply_append_coloring(sheet, cell_address, current_value, new_value):
+    """Apply append-style color coding (green for old, red for new)"""
+    try:
+        # Get the cell
+        cell = sheet.range(cell_address)
+        
+        # Check if cell is part of a merged range
+        if cell.api.MergeCells:
+            # Get the merged range address
+            merged_range_address = cell.api.MergeArea.Address
+            # Use the top-left cell of the merged range
+            cell = sheet.range(merged_range_address.split(':')[0])
+        
+        current_value_str = str(current_value).strip()
+        
+        if current_value != "":
+            if new_value is not None:
+                cell_values = current_value_str.split('\n')
+                end = len(cell_values) - 1
+                
+                if end >= 0 and cell_values[end] != str(new_value).strip():
+                    # Format differently using xlwings
+                    new_value_str = f"{current_value_str}\n{str(new_value).strip()}"
+                    cell.value = new_value_str
+                    
+                    # Apply formatting (green for old, red for new)
+                    try:
+                        last_line_pos = len(current_value_str)
+                        # Ensure the cell has content before trying to format characters
+                        if cell.value and len(str(cell.value)) > 0:
+                            # Use Font.ColorIndex as a safer alternative
+                            cell.characters[:last_line_pos].font.color = (0, 170, 0)  # Green (RGB)
+                            cell.characters[last_line_pos:].font.color = (255, 0, 0)  # Red (RGB)
+                    except Exception as e:
+                        print(f"Warning: Could not format text colors: {e}")
+                        # Fallback: try to set the entire cell to red if formatting fails
+                        try:
+                            cell.api.Font.Color = (255, 0, 0)  # Red (RGB)
+                        except Exception as fallback_e:
+                            print(f"Warning: Could not apply fallback color formatting: {fallback_e}")
+        else:
+            if new_value is not None:
+                cell.value = new_value
+                
+    except Exception as e:
+        print(f"Error applying append coloring: {e}")
+        # Fallback: just set the value without formatting
+        try:
+            cell.value = new_value
+        except:
+            pass
+
+def update_cell_xlwings(sheet, cell_address, value, cell_update_option=None):
     """Update cell using xlwings with similar functionality.
-    This function works with merged cells too. Skips update if values are identical."""
+    This function works with merged cells too. Skips update if values are identical.
+    
+    Args:
+        sheet: The worksheet to update
+        cell_address: The cell address to update
+        value: The new value to set
+        cell_update_option: Color coding option - None (black), "new_red_old_green" (current method), or "new_red" (character-level)
+    """
     
     try:
-        
         # Convert value to string for comparison if it's not None
         value_str = str(value).strip() if value is not None else None
         
@@ -427,64 +555,49 @@ def update_cell_xlwings(sheet, cell_address, value):
             print(f"Skipping update for {cell_address}: values are identical or there is no source value ({value_str})")
             return True
         
-        if current_value != "":
-            current_value_str = str(current_value).strip()
+        # Handle different color coding options
+        if cell_update_option == "new_red":
+            # Character-level color coding - replace entire content and color changes red
+            cell.value = value_str
+            apply_character_coloring(sheet, cell_address, current_value_str, value_str)
             
-            if value is not None:
-                cell_values = current_value_str.split('\n')
-                end = len(cell_values) - 1
-                
-                if end >= 0 and cell_values[end] != value_str:
-                    # Format differently using xlwings
-                    new_value = f"{current_value_str}\n{value_str}"
-                    cell.value = new_value
-                    
-                    # Apply formatting (green for old, red for new)
-                    try:
-                        last_line_pos = len(current_value_str)
-                        # Ensure the cell has content before trying to format characters
-                        if cell.value and len(str(cell.value)) > 0:
-                            # Use Font.ColorIndex as a safer alternative
-                            cell.characters[:last_line_pos].font.color = (0, 170, 0)  # Green (RGB)
-                            cell.characters[last_line_pos:].font.color = (255, 0, 0)  # Red (RGB)
-                    except Exception as e:
-                        print(f"Warning: Could not format text colors: {e}")
-                        # Fallback: try to set the entire cell to red if formatting fails
-                        try:
-                            cell.api.Font.Color = (255, 0, 0)  # Red (RGB)
-                        except Exception as fallback_e:
-                            print(f"Warning: Could not apply fallback color formatting: {fallback_e}")
-                    
+        elif cell_update_option == "new_red_old_green":
+            # Current method - append with new line and color old green, new red
+            apply_append_coloring(sheet, cell_address, current_value, value)
+            
         else:
-            if value is not None:
-                cell.value = value
-                try:
-                    # Ensure the cell has content before trying to format characters
-                    if cell.value and len(str(cell.value)) > 0:
-                        # Use xlwings characters property with RGB colors
-                        cell.characters[:].font.color = (255, 0, 0)  # Red (RGB)
-                    else:
-                        # Fallback: set the entire cell font color to red
-                        cell.api.Font.Color = (255, 0, 0)  # Red (RGB)
-                except Exception as e:
-                    print(f"Warning: Could not format text color: {e}")
-                    # Final fallback: try to set the entire cell to red
-                    try:
-                        cell.api.Font.Color = (255, 0, 0)  # Red (RGB)
-                    except Exception as fallback_e:
-                        print(f"Warning: Could not apply fallback color formatting: {fallback_e}")
-                
+            # No color coding - just update the value in black
+            cell.value = value_str
+
                 
         return True
     except Exception as e:
         print(f'Error updating cell {cell_address}: {e}')
         return False
 
+def apply_green_highlighting(sheet, cell_address):
+    """Apply green background highlighting to a cell"""
+    try:
+        # Get the cell
+        cell = sheet.range(cell_address)
+        
+        # Check if cell is part of a merged range
+        if cell.api.MergeCells:
+            # Get the merged range address
+            merged_range_address = cell.api.MergeArea.Address
+            # Use the top-left cell of the merged range
+            cell = sheet.range(merged_range_address.split(':')[0])
+        
+        # Apply green background color
+        cell.color = (0, 255, 0)  # Green (RGB)
+        
+    except Exception as e:
+        print(f"Error applying green highlighting to {cell_address}: {e}")
 
 
 def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
                    rows_per_sheet=1, custom_sort=None, key_coordinate='I12',
-                   sig_figs=4, tolerance=1e-2, halt_callback=None):
+                   sig_figs=4, tolerance=1e-2, halt_callback=None, cell_update_option=None):
     """
     Manages Excel sheets by adding or updating data based on tags.
     
@@ -492,6 +605,7 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
     
     Args:
         halt_callback: Optional function that returns True if the process should be halted
+        cell_update_option: Color coding option - None (black), "new_red_old_green" (current method), or "new_red" (character-level)
     """
     # Determine if we can create new sheets
     can_create_new_sheets = False
@@ -549,9 +663,19 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                 try:
                     target_cell = increment_cell_reference(cell, row_offset)
                     value = try_round_to_sigfigs(value, sig_figs, tolerance)
-                    update_cell_xlwings(target_sheet, target_cell, value)
+                    update_cell_xlwings(target_sheet, target_cell, value, cell_update_option)
                 except Exception as e:
                     print(f"Error updating cell {cell} for tag {tag}: {e}")
+    
+    # Check for unmatched tags in existing sheets and highlight them in green
+    unmatched_tags = set(existing_tags.keys()) - set(sorted_keys)
+    if unmatched_tags:
+        print(f"Found {len(unmatched_tags)} unmatched tags that will be highlighted in green: {unmatched_tags}")
+        for tag in unmatched_tags:
+            sheet_name, tag_coord = existing_tags[tag]
+            target_sheet = datasheet.sheets[sheet_name]
+            print(f"Highlighting unmatched tag '{tag}' at {tag_coord} in sheet '{sheet_name}'")
+            apply_green_highlighting(target_sheet, tag_coord)
     
     # Create new sheets for remaining tags if we have a source sheet
     if can_create_new_sheets:
@@ -580,13 +704,15 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                 except:
                     pass
                 target_sheet = source_sheet.copy(name=sheet_name)
+                # Ensure the copied sheet is visible (fix for sheets being hidden)
+                target_sheet.visible = True
                 added_sheets.add(sheet_name)
-                update_cell_xlwings(target_sheet, datasheet_coord, datasheet_no)
+                update_cell_xlwings(target_sheet, datasheet_coord, datasheet_no, cell_update_option)
             else:
                 target_sheet = datasheet.sheets[sheet_name]
                 
             tag_coord = increment_cell_reference(key_coordinate, count % rows_per_sheet)
-            update_cell_xlwings(target_sheet, tag_coord, tag)
+            update_cell_xlwings(target_sheet, tag_coord, tag, cell_update_option)
             
             # Update cells for this tag
             cell_values = tag_cell_values[tag]
@@ -601,7 +727,7 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                 try:
                     target_cell = increment_cell_reference(cell, row_offset)
                     value = try_round_to_sigfigs(value, sig_figs, tolerance)
-                    update_cell_xlwings(target_sheet, target_cell, value)
+                    update_cell_xlwings(target_sheet, target_cell, value, cell_update_option)
                 except Exception as e:
                     print(f"Error updating cell {cell} for tag {tag}: {e}")
                     

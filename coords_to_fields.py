@@ -539,6 +539,12 @@ class CoordsToFieldsGenerator:
 
     def update_entry(self):
         try:
+            # Check if workbook is still open
+            if not self._is_workbook_open():
+                print("Excel workbook was closed, closing coordinate mapper...")
+                self.on_closing()
+                return
+                
             current_selection = self.wb.selection.address
             current_selection = current_selection.split(':')[0]
             current_selection = current_selection.replace('$', '')
@@ -546,11 +552,33 @@ class CoordsToFieldsGenerator:
             self.coord_entry.insert(0, current_selection)
         except Exception as e:
             print(f"Error updating entry: {e}")
+            # If we can't access the workbook, it might be closed
+            if not self._is_workbook_open():
+                print("Excel workbook appears to be closed, closing coordinate mapper...")
+                self.on_closing()
+                return
         self.coords_window.after(200, self.update_entry)
+
+    def _is_workbook_open(self):
+        """Check if the Excel workbook is still open and accessible"""
+        try:
+            if not self.wb:
+                return False
+            
+            # Try to access the workbook's name or any property
+            # This will raise an exception if the workbook is closed
+            _ = self.wb.name
+            return True
+        except Exception:
+            # Workbook is closed or no longer accessible
+            return False
 
     def on_closing(self):
         if self.wb:
-            self.wb.close()
+            try:
+                self.wb.close()
+            except Exception as e:
+                print(f"Error closing workbook: {e}")
         self.coords_window.destroy()
 
     def get_result(self):

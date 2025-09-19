@@ -5,7 +5,7 @@ import openpyxl
 import ast
 import json
 import os
-from coords_to_fields import CoordsToFieldsGenerator
+from coords_to_fields_refactored import CoordsToFieldsGenerator
 
 
 def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet=1):
@@ -29,8 +29,6 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
         # Iterate over each coordinate-field name pair
         for i in range(tags_per_sheet):
             tag = ws[tag_coord].value
-            if not tag:
-                continue
             tag_data = {}
             for coord, field_name in coords_to_fields.items():
                 # Extract the value from the specified cell
@@ -80,9 +78,11 @@ class DatasheetExtractor:
         self.root = root
         self.root.title("Datasheet Data Extraction GUI")
         self.callback = callback
+        self.config_file = "datasheet_extractor_config.json"
 
         self.create_widgets()
         self.create_top_menu()
+        self.load_last_values()
 
     def create_widgets(self):
         # Create main frame to hold all content
@@ -96,6 +96,7 @@ class DatasheetExtractor:
         tk.Label(file_frame, text="File Path").pack(side=tk.LEFT, padx=(0, 5))
         self.file_path_entry = tk.Entry(file_frame)
         self.file_path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.file_path_entry.bind('<KeyRelease>', self.on_entry_change)
         browse_button = tk.Button(file_frame, text="Browse", command=self.browse_file_path)
         browse_button.pack(side=tk.LEFT)
 
@@ -106,6 +107,7 @@ class DatasheetExtractor:
         tk.Label(tag_frame, text="Init Tag Coord").pack(side=tk.LEFT, padx=(0, 5))
         self.init_tag_coord_entry = tk.Entry(tag_frame)
         self.init_tag_coord_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.init_tag_coord_entry.bind('<KeyRelease>', self.on_entry_change)
 
         # Init Coords to Fields row frame
         coords_frame = tk.Frame(main_frame)
@@ -114,6 +116,7 @@ class DatasheetExtractor:
         tk.Label(coords_frame, text="Init Coords to Fields").pack(side=tk.LEFT, padx=(0, 5))
         self.init_coords_to_fields_entry = tk.Entry(coords_frame)
         self.init_coords_to_fields_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.init_coords_to_fields_entry.bind('<KeyRelease>', self.on_entry_change)
         set_coords_button = tk.Button(coords_frame, text="Set Coordinate Fields", command=self.generate_coords_to_fields)
         set_coords_button.pack(side=tk.LEFT)
 
@@ -124,6 +127,7 @@ class DatasheetExtractor:
         tk.Label(tags_frame, text="Tags per Sheet").pack(side=tk.LEFT, padx=(0, 5))
         self.tags_per_sheet_entry = tk.Entry(tags_frame)
         self.tags_per_sheet_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.tags_per_sheet_entry.bind('<KeyRelease>', self.on_entry_change)
 
         # Buttons frame
         buttons_frame = tk.Frame(main_frame)
@@ -177,6 +181,7 @@ class DatasheetExtractor:
         if filepath:
             self.file_path_entry.delete(0, tk.END)
             self.file_path_entry.insert(0, filepath)
+            self.save_last_values()
 
     def start_extraction(self):
         file_path = self.file_path_entry.get()
@@ -239,6 +244,7 @@ class DatasheetExtractor:
         result = generator.get_result()
         self.init_coords_to_fields_entry.delete(0, tk.END)
         self.init_coords_to_fields_entry.insert(0, str(result))
+        self.save_last_values()
 
     def dummy_command(self):
         print("Menu item clicked!")
@@ -249,13 +255,52 @@ class DatasheetExtractor:
                             Version: 1.0
                             Author: Your Name
                             This application allows users to extract data from Excel datasheets.""")
+    
+    def save_last_values(self):
+        """Save current entry values to config file"""
+        config = {
+            "file_path": self.file_path_entry.get(),
+            "init_tag_coord": self.init_tag_coord_entry.get(),
+            "init_coords_to_fields": self.init_coords_to_fields_entry.get(),
+            "tags_per_sheet": self.tags_per_sheet_entry.get()
+        }
+        
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f, indent=4)
+        except Exception as e:
+            print(f"Error saving config: {e}")
+    
+    def load_last_values(self):
+        """Load last values from config file"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+                
+                # Populate entries with saved values
+                if "file_path" in config:
+                    self.file_path_entry.insert(0, config["file_path"])
+                if "init_tag_coord" in config:
+                    self.init_tag_coord_entry.insert(0, config["init_tag_coord"])
+                if "init_coords_to_fields" in config:
+                    self.init_coords_to_fields_entry.insert(0, config["init_coords_to_fields"])
+                if "tags_per_sheet" in config:
+                    self.tags_per_sheet_entry.insert(0, config["tags_per_sheet"])
+        except Exception as e:
+            print(f"Error loading config: {e}")
+    
+    def on_entry_change(self, event=None):
+        """Called when any entry field changes - auto-saves values"""
+        self.save_last_values()
 
 
-'''
+
 def on_extraction_complete(result, save_path):
     print(f"Extraction complete. Result saved to: {save_path}")
 
-root = tk.Tk()
-app = DatasheetExtractor(root, callback=on_extraction_complete)
-root.mainloop()
-'''
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = DatasheetExtractor(root, callback=on_extraction_complete)
+    root.mainloop()
+

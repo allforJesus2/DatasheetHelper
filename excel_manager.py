@@ -117,6 +117,26 @@ class ExcelManager:
             print(f"Error closing workbook: {e}")
             return False
 
+    def release_connection(self):
+        """Release xlwings connection but keep workbook open in Excel"""
+        try:
+            # Don't close the workbook - just release our connection to it
+            # The workbook will remain open in Excel for the user to save
+            
+            # Clear our references to release the xlwings connection
+            self.wb = None 
+            self.app = None
+            self.is_dirty = False
+            
+            # Force garbage collection to ensure xlwings objects are cleaned up
+            import gc
+            collected = gc.collect()
+            print(f"Garbage collector collected {collected} objects")
+            return True
+        except Exception as e:
+            print(f"Error releasing connection: {e}")
+            return False
+
     def cleanup(self):
         """Clean up Excel resources"""
         try:

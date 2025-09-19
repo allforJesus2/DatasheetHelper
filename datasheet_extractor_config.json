@@ -1,0 +1,6 @@
+{
+    "file_path": "C:/Users/dcaoili/New folder (4)/FMAG Flowmeter (Magnetic).xlsx",
+    "init_tag_coord": "g18",
+    "init_coords_to_fields": "{'G18': 'LINE NUMBER', 'G19': 'LINE SIZE', 'G43': 'FLOW (L/m)_MIN.', 'H43': 'FLOW (L/m)_OPER.', 'K43': 'FLOW (L/m)_MAX.', 'G44': 'PRESSURE (kPa)_MIN.', 'H44': 'PRESSURE (kPa)_OPER.', 'K44': 'PRESSURE (kPa)_MAX.', 'G45': 'TEMPERATURE (\u00b0C)_MIN.', 'H45': 'TEMPERATURE (\u00b0C)_OPER.', 'K45': 'TEMPERATURE (\u00b0C)_MAX.', 'G46': 'DESIGN PRESSURE (kPa)', 'G47': 'DESIGN TEMPERATURE (\u00b0C)', 'I13': 'service'}",
+    "tags_per_sheet": "1"
+}

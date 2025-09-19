@@ -1,0 +1,74 @@
+Sub CopyNonContiguousToSheets()
+    ' ---
+    ' This macro copies multiple, non-adjacent selected ranges (called "Areas")
+    ' from the active sheet to other sheets in the workbook.
+    ' It targets sheets based on a prefix provided by the user.
+    ' It preserves all formatting, formulas, and values.
+    ' ---
+
+    ' Declare variables
+    Dim mainSheet As Worksheet
+    Dim targetSheet As Worksheet
+    Dim selectedArea As Range
+    Dim sheetPrefix As String
+    
+    ' --- Error Handling and Initial Checks ---
+    
+    ' Check if the user has actually selected a range of cells.
+    If TypeName(Selection) <> "Range" Then
+        MsgBox "Operation cancelled: Please select one or more cell ranges before running this macro.", vbExclamation, "No Range Selected"
+        Exit Sub
+    End If
+    
+    ' Prompt the user to enter the prefix for the target sheets.
+    sheetPrefix = InputBox("Enter the prefix for the sheets you want to copy to:", "Enter Sheet Prefix")
+    
+    ' If the user clicks Cancel or leaves the box empty, exit the macro.
+    If sheetPrefix = "" Then
+        MsgBox "Operation cancelled: No prefix was entered.", vbInformation, "Cancelled"
+        Exit Sub
+    End If
+    
+    ' --- Main Operation ---
+    
+    ' Set the active sheet as the source sheet to return to it later.
+    Set mainSheet = ActiveSheet
+    
+    ' Turn off screen updating to make the macro run faster and prevent flickering.
+    Application.ScreenUpdating = False
+    
+    ' Loop through every worksheet in the entire workbook.
+    For Each targetSheet In ThisWorkbook.Worksheets
+        ' Check two conditions:
+        ' 1. If the sheet's name starts with the user-provided prefix.
+        ' 2. If the sheet is not the source sheet we are copying from.
+        If Left(targetSheet.Name, Len(sheetPrefix)) = sheetPrefix And targetSheet.Name <> mainSheet.Name Then
+        
+            ' Loop through each separate, non-adjacent area in the user's selection.
+            For Each selectedArea In Selection.Areas
+                ' Copy the current area.
+                selectedArea.Copy
+                
+                ' Paste everything (values, formulas, formatting) into the same address on the target sheet.
+                targetSheet.Range(selectedArea.Address).PasteSpecial Paste:=xlPasteAllUsingSourceTheme
+            Next selectedArea
+            
+        End If
+    Next targetSheet
+    
+    ' --- Cleanup ---
+    
+    ' Clear the "marching ants" from the last copied selection.
+    Application.CutCopyMode = False
+    
+    ' Turn screen updating back on.
+    Application.ScreenUpdating = True
+    
+    ' Re-activate the original sheet where the macro was started.
+    mainSheet.Activate
+    
+    ' Inform the user that the operation is complete.
+    MsgBox "Successfully copied non-adjacent cells to all sheets with the prefix '" & sheetPrefix & "'.", vbInformation, "Operation Complete"
+
+End Sub
+

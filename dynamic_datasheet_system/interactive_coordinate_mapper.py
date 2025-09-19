@@ -180,13 +180,23 @@ class InteractiveCoordinateMapper:
     def update_coordinate_entry(self):
         """Update the coordinate entry with current Excel selection"""
         try:
+            # Check if Excel app and workbook are still open
+            if not self._is_excel_accessible():
+                print("Excel application or workbook was closed, closing coordinate mapper...")
+                self.close_window()
+                return
+                
             if self.app and self.app.books.active:
                 current_selection = self.app.selection.address
                 current_selection = current_selection.split(':')[0].replace('$', '')
                 self.coord_var.set(current_selection)
         except Exception as e:
             # Excel might not be active or selection might not be available
-            pass
+            print(f"Error updating coordinate entry: {e}")
+            if not self._is_excel_accessible():
+                print("Excel appears to be closed, closing coordinate mapper...")
+                self.close_window()
+                return
         
         # Continue updating
         self.window.after(200, self.update_coordinate_entry)
@@ -368,6 +378,20 @@ class InteractiveCoordinateMapper:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to update datasheets: {e}")
             
+    def _is_excel_accessible(self):
+        """Check if Excel application and workbook are still accessible"""
+        try:
+            if not self.app:
+                return False
+            
+            # Try to access the app's books collection
+            # This will raise an exception if Excel is closed
+            _ = self.app.books
+            return True
+        except Exception:
+            # Excel application is closed or no longer accessible
+            return False
+
     def close_window(self):
         """Close the window"""
         try:
