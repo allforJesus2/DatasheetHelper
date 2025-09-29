@@ -8,7 +8,7 @@ import os
 from coords_to_fields_refactored import CoordsToFieldsGenerator
 
 
-def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet=1):
+def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet=1, selected_sheets=None):
     """
      Extracts data from Excel datasheets using openpyxl.
 
@@ -16,6 +16,13 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
      extracting data based on initial coordinates and mappings between coordinates and field names.
      It returns a dictionary where keys are tags (e.g., sheet names) and values are dictionaries containing
      field names as keys and their corresponding cell values as values.
+     
+     Args:
+         file_path: Path to the Excel file
+         init_tag_coord: Initial coordinate for tag extraction
+         init_coords_to_fields: Dictionary mapping coordinates to field names
+         tags_per_sheet: Number of tags to extract per sheet
+         selected_sheets: List of sheet names to process (if None, processes all sheets)
      """
     # Load the workbook
     wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
@@ -23,7 +30,13 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
     # Initialize an empty dictionary to store the extracted data
     all_tag_data = {}
 
-    for ws in wb.worksheets:
+    # If no specific sheets are selected, process all sheets
+    if selected_sheets is None:
+        worksheets_to_process = wb.worksheets
+    else:
+        worksheets_to_process = [ws for ws in wb.worksheets if ws.title in selected_sheets]
+
+    for ws in worksheets_to_process:
         tag_coord = init_tag_coord
         coords_to_fields = init_coords_to_fields
         # Iterate over each coordinate-field name pair
@@ -74,15 +87,20 @@ def split_text_on_first_number(text):
 
 
 class DatasheetExtractor:
-    def __init__(self, root, callback=None):
+    def __init__(self, root, callback=None, file_path=None):
         self.root = root
         self.root.title("Datasheet Data Extraction GUI")
         self.callback = callback
         self.config_file = "datasheet_extractor_config.json"
+        self.initial_file_path = file_path
 
         self.create_widgets()
         self.create_top_menu()
         self.load_last_values()
+        
+        # Load sheets if file path was provided during initialization
+        if file_path and os.path.exists(file_path):
+            self.load_sheets_from_file(file_path)
 
     def create_widgets(self):
         # Create main frame to hold all content
@@ -128,6 +146,40 @@ class DatasheetExtractor:
         self.tags_per_sheet_entry = tk.Entry(tags_frame)
         self.tags_per_sheet_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.tags_per_sheet_entry.bind('<KeyRelease>', self.on_entry_change)
+
+        # Sheet Selection frame
+        sheet_selection_frame = tk.Frame(main_frame)
+        sheet_selection_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Sheet filter input
+        filter_frame = tk.Frame(sheet_selection_frame)
+        filter_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        tk.Label(filter_frame, text="Filter Sheets:").pack(side=tk.LEFT, padx=(0, 5))
+        self.sheet_filter_entry = tk.Entry(filter_frame)
+        self.sheet_filter_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        self.sheet_filter_entry.bind('<KeyRelease>', self.filter_sheets)
+        
+        # Select All/None buttons
+        select_all_button = tk.Button(filter_frame, text="Select All", command=self.select_all_sheets)
+        select_all_button.pack(side=tk.LEFT, padx=(0, 2))
+        select_none_button = tk.Button(filter_frame, text="Select None", command=self.select_none_sheets)
+        select_none_button.pack(side=tk.LEFT)
+        
+        # Sheet listbox with scrollbar
+        listbox_frame = tk.Frame(sheet_selection_frame)
+        listbox_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.sheet_listbox = tk.Listbox(listbox_frame, selectmode=tk.MULTIPLE)
+        scrollbar = tk.Scrollbar(listbox_frame, orient=tk.VERTICAL, command=self.sheet_listbox.yview)
+        self.sheet_listbox.config(yscrollcommand=scrollbar.set)
+        
+        self.sheet_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Initialize sheet-related variables
+        self.all_sheets = []
+        self.filtered_sheets = []
 
         # Buttons frame
         buttons_frame = tk.Frame(main_frame)
@@ -181,6 +233,7 @@ class DatasheetExtractor:
         if filepath:
             self.file_path_entry.delete(0, tk.END)
             self.file_path_entry.insert(0, filepath)
+            self.load_sheets_from_file(filepath)
             self.save_last_values()
 
     def start_extraction(self):
@@ -188,9 +241,14 @@ class DatasheetExtractor:
         init_tag_coord = self.init_tag_coord_entry.get()
         init_coords_to_fields = dict(eval(self.init_coords_to_fields_entry.get()))
         tags_per_sheet = int(self.tags_per_sheet_entry.get() if self.tags_per_sheet_entry.get().isdigit() else 1)
+        selected_sheets = self.get_selected_sheets()
+
+        # If no sheets are selected, use all sheets
+        if not selected_sheets:
+            selected_sheets = self.all_sheets
 
         try:
-            result = extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet)
+            result = extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet, selected_sheets)
             messagebox.showinfo("Result", "Data extraction completed successfully.")
 
             save_path = filedialog.asksaveasfilename(defaultextension=".json",
@@ -262,7 +320,8 @@ class DatasheetExtractor:
             "file_path": self.file_path_entry.get(),
             "init_tag_coord": self.init_tag_coord_entry.get(),
             "init_coords_to_fields": self.init_coords_to_fields_entry.get(),
-            "tags_per_sheet": self.tags_per_sheet_entry.get()
+            "tags_per_sheet": self.tags_per_sheet_entry.get(),
+            "selected_sheets": self.get_selected_sheets()
         }
         
         try:
@@ -274,25 +333,102 @@ class DatasheetExtractor:
     def load_last_values(self):
         """Load last values from config file"""
         try:
-            if os.path.exists(self.config_file):
+            # If initial file path is provided, use it and load other values from config
+            if self.initial_file_path:
+                self.file_path_entry.insert(0, self.initial_file_path)
+                self.load_sheets_from_file(self.initial_file_path)
+                # Still load other values from config if available
+                if os.path.exists(self.config_file):
+                    with open(self.config_file, 'r') as f:
+                        config = json.load(f)
+                    
+                    if "init_tag_coord" in config:
+                        self.init_tag_coord_entry.insert(0, config["init_tag_coord"])
+                    if "init_coords_to_fields" in config:
+                        self.init_coords_to_fields_entry.insert(0, config["init_coords_to_fields"])
+                    if "tags_per_sheet" in config:
+                        self.tags_per_sheet_entry.insert(0, config["tags_per_sheet"])
+                    if "selected_sheets" in config and config["selected_sheets"]:
+                        # Restore selected sheets after a short delay to ensure listbox is populated
+                        self.root.after(100, lambda: self.restore_selected_sheets(config["selected_sheets"]))
+            elif os.path.exists(self.config_file):
                 with open(self.config_file, 'r') as f:
                     config = json.load(f)
                 
                 # Populate entries with saved values
                 if "file_path" in config:
                     self.file_path_entry.insert(0, config["file_path"])
+                    # Load sheets if file path is available
+                    if config["file_path"]:
+                        self.load_sheets_from_file(config["file_path"])
                 if "init_tag_coord" in config:
                     self.init_tag_coord_entry.insert(0, config["init_tag_coord"])
                 if "init_coords_to_fields" in config:
                     self.init_coords_to_fields_entry.insert(0, config["init_coords_to_fields"])
                 if "tags_per_sheet" in config:
                     self.tags_per_sheet_entry.insert(0, config["tags_per_sheet"])
+                if "selected_sheets" in config and config["selected_sheets"]:
+                    # Restore selected sheets after a short delay to ensure listbox is populated
+                    self.root.after(100, lambda: self.restore_selected_sheets(config["selected_sheets"]))
         except Exception as e:
             print(f"Error loading config: {e}")
     
     def on_entry_change(self, event=None):
         """Called when any entry field changes - auto-saves values"""
         self.save_last_values()
+
+    def load_sheets_from_file(self, filepath):
+        """Load sheet names from the Excel file and populate the listbox"""
+        try:
+            wb = openpyxl.load_workbook(filepath, read_only=True)
+            self.all_sheets = wb.sheetnames
+            wb.close()
+            self.update_sheet_listbox()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not load sheets from file: {str(e)}")
+            self.all_sheets = []
+            self.update_sheet_listbox()
+
+    def update_sheet_listbox(self):
+        """Update the listbox with current filtered sheets"""
+        self.sheet_listbox.delete(0, tk.END)
+        for sheet in self.filtered_sheets:
+            self.sheet_listbox.insert(tk.END, sheet)
+
+    def filter_sheets(self, event=None):
+        """Filter sheets based on the filter text input"""
+        filter_text = self.sheet_filter_entry.get().lower()
+        if filter_text:
+            self.filtered_sheets = [sheet for sheet in self.all_sheets if filter_text in sheet.lower()]
+        else:
+            self.filtered_sheets = self.all_sheets.copy()
+        self.update_sheet_listbox()
+
+    def select_all_sheets(self):
+        """Select all visible sheets in the listbox"""
+        self.sheet_listbox.selection_set(0, tk.END)
+
+    def select_none_sheets(self):
+        """Deselect all sheets in the listbox"""
+        self.sheet_listbox.selection_clear(0, tk.END)
+
+    def get_selected_sheets(self):
+        """Get list of currently selected sheet names"""
+        selected_indices = self.sheet_listbox.curselection()
+        return [self.filtered_sheets[i] for i in selected_indices]
+
+    def restore_selected_sheets(self, selected_sheet_names):
+        """Restore previously selected sheets"""
+        try:
+            # Clear current selection
+            self.sheet_listbox.selection_clear(0, tk.END)
+            
+            # Find and select the sheets that were previously selected
+            for i, sheet_name in enumerate(self.filtered_sheets):
+                if sheet_name in selected_sheet_names:
+                    self.sheet_listbox.selection_set(i)
+        except Exception as e:
+            print(f"Error restoring selected sheets: {e}")
 
 
 
