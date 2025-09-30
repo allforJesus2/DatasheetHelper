@@ -65,19 +65,27 @@ class ExcelManager:
 
     def open_workbook(self, path):
         """Opens a workbook with special handling for network paths"""
+        print(f"DEBUG: ExcelManager.open_workbook starting for path: {path}")
         try:
             # Force close any existing connections
+            print("DEBUG: ExcelManager cleaning up existing connections...")
             self.cleanup()
+            print("DEBUG: ExcelManager cleanup completed")
             
             # Create new Excel instance without a blank workbook
+            print("DEBUG: ExcelManager creating new Excel app...")
             self.app = xw.App(visible=True, add_book=False)
             self.app.display_alerts = False
+            print("DEBUG: ExcelManager Excel app created")
             
             # Open workbook
+            print("DEBUG: ExcelManager opening workbook...")
             self.wb = self.app.books.open(path)
             self.is_dirty = False
+            print("DEBUG: ExcelManager workbook opened successfully")
             
         except Exception as e:
+            print(f"DEBUG: ExcelManager error opening workbook: {e}")
             self.cleanup()
             raise Exception(f"Failed to open workbook: {e}")
 
@@ -139,17 +147,24 @@ class ExcelManager:
 
     def cleanup(self):
         """Clean up Excel resources"""
+        print("DEBUG: ExcelManager cleanup starting...")
         try:
             if self.wb:
+                print("DEBUG: ExcelManager closing workbook...")
                 self.wb.close()
+                print("DEBUG: ExcelManager workbook closed")
             if self.app:
+                print("DEBUG: ExcelManager quitting Excel app...")
                 self.app.quit()
-        except:
+                print("DEBUG: ExcelManager Excel app quit")
+        except Exception as e:
+            print(f"DEBUG: ExcelManager cleanup error: {e}")
             pass
         finally:
             self.wb = None 
             self.app = None
             self.is_dirty = False
+            print("DEBUG: ExcelManager cleanup completed")
 
     def mark_as_modified(self):
         """Marks the workbook as having unsaved changes"""

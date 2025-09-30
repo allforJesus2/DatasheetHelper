@@ -618,18 +618,19 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
             source_sheet = None
     
     # Find all existing tags
-    existing_tags = {}
+    existing_tags = []
     for sheet in datasheet.sheets:
         if sheet.name == source_sheet_name:
             continue
             
         if sheet.name.startswith(ds_prefix) or ds_prefix == '' :
             print(f"Processing sheet {sheet.name} since it starts with {ds_prefix}")
+            print('key_coordinate', key_coordinate)
             for i in range(rows_per_sheet):
                 offset_coord = increment_cell_reference(key_coordinate, i)
                 tag_value = sheet.range(offset_coord).value
                 if tag_value:
-                    existing_tags[tag_value] = (sheet.name, offset_coord)
+                    existing_tags.append((tag_value, sheet.name, offset_coord))
     
     print(f'Existing tags: {existing_tags}')
     
@@ -644,44 +645,51 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
             print("Process halted by user")
             return list(added_sheets)
             
-        if tag in existing_tags:
-            # Update values for existing tag
-            print(f'Updating existing tag {tag}')
-            sheet_name, tag_coord = existing_tags[tag]
-            target_sheet = datasheet.sheets[sheet_name]
-            
-            # Update cells for this tag
-            cell_values = tag_cell_values[tag]
-            try:
-                row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
-            except (ValueError, IndexError) as e:
-                print(f"Error calculating row offset for existing tag {tag}: {e}")
-                print(f"tag_coord: '{tag_coord}', key_coordinate: '{key_coordinate}'")
-                row_offset = 0  # Default to 0 if we can't calculate the offset
-            
-            for cell, value in cell_values.items():
+        # Find all instances of this tag in existing_tags list
+        tag_instances = [(sheet_name, tag_coord) for tag_value, sheet_name, tag_coord in existing_tags if tag_value == tag]
+        
+        if tag_instances:
+            # Update values for all instances of existing tag
+            print(f'Updating existing tag {tag} found in {len(tag_instances)} instance(s)')
+            for sheet_name, tag_coord in tag_instances:
+                target_sheet = datasheet.sheets[sheet_name]
+                
+                # Update cells for this tag
+                cell_values = tag_cell_values[tag]
                 try:
-                    target_cell = increment_cell_reference(cell, row_offset)
-                    value = try_round_to_sigfigs(value, sig_figs, tolerance)
-                    update_cell_xlwings(target_sheet, target_cell, value, cell_update_option)
-                except Exception as e:
-                    print(f"Error updating cell {cell} for tag {tag}: {e}")
+                    row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
+                except (ValueError, IndexError) as e:
+                    print(f"Error calculating row offset for existing tag {tag}: {e}")
+                    print(f"tag_coord: '{tag_coord}', key_coordinate: '{key_coordinate}'")
+                    row_offset = 0  # Default to 0 if we can't calculate the offset
+                
+                for cell, value in cell_values.items():
+                    try:
+                        target_cell = increment_cell_reference(cell, row_offset)
+                        value = try_round_to_sigfigs(value, sig_figs, tolerance)
+                        update_cell_xlwings(target_sheet, target_cell, value, cell_update_option)
+                    except Exception as e:
+                        print(f"Error updating cell {cell} for tag {tag}: {e}")
     
     # Check for unmatched tags in existing sheets and highlight them in green
-    unmatched_tags = set(existing_tags.keys()) - set(sorted_keys)
+    existing_tag_values = {tag_value for tag_value, _, _ in existing_tags}
+    unmatched_tags = existing_tag_values - set(sorted_keys)
     if unmatched_tags:
         print(f"Found {len(unmatched_tags)} unmatched tags that will be highlighted in green: {unmatched_tags}")
         for tag in unmatched_tags:
-            sheet_name, tag_coord = existing_tags[tag]
-            target_sheet = datasheet.sheets[sheet_name]
-            print(f"Highlighting unmatched tag '{tag}' at {tag_coord} in sheet '{sheet_name}'")
-            apply_green_highlighting(target_sheet, tag_coord)
+            # Find all instances of this unmatched tag
+            tag_instances = [(sheet_name, tag_coord) for tag_value, sheet_name, tag_coord in existing_tags if tag_value == tag]
+            for sheet_name, tag_coord in tag_instances:
+                target_sheet = datasheet.sheets[sheet_name]
+                print(f"Highlighting unmatched tag '{tag}' at {tag_coord} in sheet '{sheet_name}'")
+                apply_green_highlighting(target_sheet, tag_coord)
     
     # Create new sheets for remaining tags if we have a source sheet
     if can_create_new_sheets:
         count = len(existing_tags)
         print(f"existing tags length: {len(existing_tags)}")
-        remaining_tags = [tag for tag in sorted_keys if tag not in existing_tags]
+        existing_tag_values = {tag_value for tag_value, _, _ in existing_tags}
+        remaining_tags = [tag for tag in sorted_keys if tag not in existing_tag_values]
         print(f"remaining tags length: {len(remaining_tags)}")
 
         for tag in remaining_tags:
