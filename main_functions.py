@@ -597,7 +597,7 @@ def apply_green_highlighting(sheet, cell_address):
 
 def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
                    rows_per_sheet=1, custom_sort=None, key_coordinate='I12',
-                   sig_figs=4, tolerance=1e-2, halt_callback=None, cell_update_option=None):
+                   sig_figs=4, tolerance=1e-2, halt_callback=None, cell_update_option=None, partial_match=False):
     """
     Manages Excel sheets by adding or updating data based on tags.
     
@@ -606,6 +606,7 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
     Args:
         halt_callback: Optional function that returns True if the process should be halted
         cell_update_option: Color coding option - None (black), "new_red_old_green" (current method), or "new_red" (character-level)
+        partial_match: If True, matches tags if found anywhere in cell text; if False, requires exact match
     """
     # Determine if we can create new sheets
     can_create_new_sheets = False
@@ -634,6 +635,18 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
     
     print(f'Existing tags: {existing_tags}')
     
+    # Helper function to check if a tag matches a cell value
+    def matches_tag(cell_value, tag, partial=False):
+        """Returns True if cell_value matches the tag based on partial_match setting"""
+        if cell_value is None:
+            return False
+        if partial:
+            # Partial match: check if tag is found in cell value (case-insensitive)
+            return str(tag).lower() in str(cell_value).lower()
+        else:
+            # Exact match
+            return cell_value == tag
+    
     # Sort tags according to custom function or default alphabetical
     sorted_keys = sorted(tag_cell_values, key=custom_sort) if custom_sort else tag_cell_values
     
@@ -646,7 +659,10 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
             return list(added_sheets)
             
         # Find all instances of this tag in existing_tags list
-        tag_instances = [(sheet_name, tag_coord) for tag_value, sheet_name, tag_coord in existing_tags if tag_value == tag]
+        tag_instances = []
+        for tag_value, sheet_name, tag_coord in existing_tags:
+            if matches_tag(tag_value, tag, partial_match):
+                tag_instances.append((sheet_name, tag_coord))
         
         if tag_instances:
             # Update values for all instances of existing tag
@@ -672,24 +688,36 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                         print(f"Error updating cell {cell} for tag {tag}: {e}")
     
     # Check for unmatched tags in existing sheets and highlight them in green
-    existing_tag_values = {tag_value for tag_value, _, _ in existing_tags}
-    unmatched_tags = existing_tag_values - set(sorted_keys)
-    if unmatched_tags:
-        print(f"Found {len(unmatched_tags)} unmatched tags that will be highlighted in green: {unmatched_tags}")
-        for tag in unmatched_tags:
-            # Find all instances of this unmatched tag
-            tag_instances = [(sheet_name, tag_coord) for tag_value, sheet_name, tag_coord in existing_tags if tag_value == tag]
-            for sheet_name, tag_coord in tag_instances:
-                target_sheet = datasheet.sheets[sheet_name]
-                print(f"Highlighting unmatched tag '{tag}' at {tag_coord} in sheet '{sheet_name}'")
-                apply_green_highlighting(target_sheet, tag_coord)
+    # For partial match mode, we need to check if any existing tag was matched
+    matched_existing_tags = set()
+    for tag_value, _, _ in existing_tags:
+        for tag in sorted_keys:
+            if matches_tag(tag_value, tag, partial_match):
+                matched_existing_tags.add(tag_value)
+                break
+    
+    unmatched_tag_instances = []
+    for tag_value, sheet_name, tag_coord in existing_tags:
+        if tag_value not in matched_existing_tags:
+            unmatched_tag_instances.append((tag_value, sheet_name, tag_coord))
+    
+    if unmatched_tag_instances:
+        print(f"Found {len(unmatched_tag_instances)} unmatched tag instances that will be highlighted in green")
+        for tag_value, sheet_name, tag_coord in unmatched_tag_instances:
+            target_sheet = datasheet.sheets[sheet_name]
+            print(f"Highlighting unmatched tag '{tag_value}' at {tag_coord} in sheet '{sheet_name}'")
+            apply_green_highlighting(target_sheet, tag_coord)
     
     # Create new sheets for remaining tags if we have a source sheet
     if can_create_new_sheets:
         count = len(existing_tags)
         print(f"existing tags length: {len(existing_tags)}")
-        existing_tag_values = {tag_value for tag_value, _, _ in existing_tags}
-        remaining_tags = [tag for tag in sorted_keys if tag not in existing_tag_values]
+        # Find remaining tags - those that don't match any existing tags
+        remaining_tags = []
+        for tag in sorted_keys:
+            has_match = any(matches_tag(tag_value, tag, partial_match) for tag_value, _, _ in existing_tags)
+            if not has_match:
+                remaining_tags.append(tag)
         print(f"remaining tags length: {len(remaining_tags)}")
 
         for tag in remaining_tags:

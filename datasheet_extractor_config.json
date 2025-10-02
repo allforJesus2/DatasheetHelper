@@ -1,6 +1,7 @@
 {
-    "file_path": "C:/Users/dcaoili/New folder (4)/FMAG Flowmeter (Magnetic).xlsx",
-    "init_tag_coord": "g18",
-    "init_coords_to_fields": "{'G18': 'LINE NUMBER', 'G19': 'LINE SIZE', 'G43': 'FLOW (L/m)_MIN.', 'H43': 'FLOW (L/m)_OPER.', 'K43': 'FLOW (L/m)_MAX.', 'G44': 'PRESSURE (kPa)_MIN.', 'H44': 'PRESSURE (kPa)_OPER.', 'K44': 'PRESSURE (kPa)_MAX.', 'G45': 'TEMPERATURE (\u00b0C)_MIN.', 'H45': 'TEMPERATURE (\u00b0C)_OPER.', 'K45': 'TEMPERATURE (\u00b0C)_MAX.', 'G46': 'DESIGN PRESSURE (kPa)', 'G47': 'DESIGN TEMPERATURE (\u00b0C)', 'I13': 'service'}",
-    "tags_per_sheet": "1"
+    "file_path": "S:/Projects/24317_Electra_CO_EPCM/Engineering/Instrumentation/DataSheets/LSVF Level Switch Vibrating Fork.xlsx",
+    "init_tag_coord": "c31",
+    "init_coords_to_fields": "{'C31': 'TAG NO.', 'E31': 'P&ID', 'F31': 'LINE / VESSEL\\nNO.', 'H31': 'SERVICE', 'Q31': 'PROCESS FLUID', 'C42': 'TAG NO.', 'E42': 'OPER. PRESS.\\n(kPag)', 'F42': 'DESIGN PRESS.\\n(kPag)', 'H42': 'OPER. TEMP.\\n(\u00b0C)', 'K42': 'DESIGN TEMP.\\n(\u00b0C)', 'N42': 'SPECIFIC GRAVITY'}",
+    "tags_per_sheet": "9",
+    "selected_sheets": []
 }

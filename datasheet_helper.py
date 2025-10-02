@@ -238,6 +238,9 @@ class DatasheetGeneratorApp:
         # Centralized data source definitions
         print("DEBUG: Setting up data source definitions...")
         self.data_sources = {}
+        
+        # Widget references for each data source
+        self.data_source_widgets = {}  # Structure: {data_source: {'frame': widget, 'config_notebook': widget, 'combo': widget, 'listbox': widget}}
 
 
 
@@ -391,13 +394,12 @@ class DatasheetGeneratorApp:
         """Update the coordinates section combo box with data from data_source_data"""
         try:
             # Get the combo box for this data source
-            combo_name = f"{data_source}_combo"
-            if hasattr(self, combo_name):
-                combo = getattr(self, combo_name)
+            combo = self.data_source_widgets.get(data_source, {}).get('combo')
+            if combo:
                 
                 # Check if the widget still exists
                 if not combo.winfo_exists():
-                    print(f"Warning: Combo box {combo_name} no longer exists")
+                    print(f"Warning: Combo box for {data_source} no longer exists")
                     return
                 
                 # Get the data for this data source
@@ -420,7 +422,7 @@ class DatasheetGeneratorApp:
                 
                 print(f"Updated coordinates combo box for {data_source} with {len(values)} values")
             else:
-                print(f"Warning: Combo box {combo_name} not found for data source {data_source}")
+                print(f"Warning: Combo box not found for data source {data_source}")
                 
         except Exception as e:
             print(f"Error updating coordinates combo box for {data_source}: {e}")
@@ -546,6 +548,7 @@ class DatasheetGeneratorApp:
             'path': '',  # File path stored directly in config
             'top_tag': '',  # Default top tag
             'source_sheet_name': 'TEMPLATE',  # Default source sheet name
+            'partial_match': False,  # Default to exact matching
             'data': {}  # Data will be stored as nested dictionaries here
         }
         
@@ -587,12 +590,14 @@ class DatasheetGeneratorApp:
             'selected_sheets': None,
             'top_tag': '',
             'source_sheet_name': 'TEMPLATE',
+            'partial_match': False,
             'data': {},
             'tag_filters': [],
             'transform_data_source': None,
             'transform_key': None,
             'transformation_code': '',
-            'coordinate_conversions': {}
+            'coordinate_conversions': {},
+            'coordinate_combinations': {}
         }
         default_config.update(config)
         
@@ -657,10 +662,12 @@ class DatasheetGeneratorApp:
             
             # View button
             tk.Button(buttons, text="View",
-                      command=lambda n=name: self.view_data(n)).pack(side=tk.LEFT, padx=2)
+                      command=lambda ds=data_source: self.view_data(data_source=ds)).pack(side=tk.LEFT, padx=2)
             
             # Store reference to frame for potential updates
-            setattr(self, f'{data_source}_frame', frame)
+            if data_source not in self.data_source_widgets:
+                self.data_source_widgets[data_source] = {}
+            self.data_source_widgets[data_source]['frame'] = frame
         print("DEBUG: create_data_source_frames completed!")
     
     def create_data_sources_notebook(self, parent):
@@ -781,6 +788,11 @@ class DatasheetGeneratorApp:
             self.data_source_ui_entries[new_data_source] = self.data_source_ui_entries[old_data_source]
             del self.data_source_ui_entries[old_data_source]
         
+        # Update widget references dictionary
+        if old_data_source in self.data_source_widgets:
+            self.data_source_widgets[new_data_source] = self.data_source_widgets[old_data_source]
+            del self.data_source_widgets[old_data_source]
+        
         # Remove old data source
         del self.data_sources[old_data_source]
         
@@ -846,6 +858,10 @@ class DatasheetGeneratorApp:
         # Remove from data sources
         if data_source in self.data_sources:
             del self.data_sources[data_source]
+        
+        # Remove from widget references
+        if data_source in self.data_source_widgets:
+            del self.data_source_widgets[data_source]
         
         # Path is now stored in config, so no need to clean up instance attributes
 
@@ -933,6 +949,10 @@ class DatasheetGeneratorApp:
         # Entry
         entry = tk.Entry(file_row)
         entry._data_source = data_source  # Store data source name for repopulation
+        # Initialize with current path from config
+        current_path = config.get('path', '')
+        if current_path:
+            entry.insert(0, current_path)
         entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
         # Buttons frame
@@ -957,7 +977,7 @@ class DatasheetGeneratorApp:
         
         # View button
         tk.Button(buttons, text="View",
-                  command=lambda n=name: self.view_data(n)).pack(side=tk.LEFT, padx=2)
+                  command=lambda ds=data_source: self.view_data(data_source=ds)).pack(side=tk.LEFT, padx=2)
         
         # Create nested notebook for configuration tabs (Coordinates, Filters, Transform)
         config_notebook = ttk.Notebook(parent)
@@ -1026,7 +1046,9 @@ class DatasheetGeneratorApp:
         source_sheet_entry.bind('<FocusOut>', update_source_sheet_name)
         
         # Store reference to the config notebook for this data source
-        setattr(self, f'{data_source}_config_notebook', config_notebook)
+        if data_source not in self.data_source_widgets:
+            self.data_source_widgets[data_source] = {}
+        self.data_source_widgets[data_source]['config_notebook'] = config_notebook
     
     def generate_data_source(self, data_source):
         """Generic method to generate data for any data source"""
@@ -1137,11 +1159,13 @@ class DatasheetGeneratorApp:
         """Refresh all data source frames when new data sources are added"""
         # Remove existing data source frames
         for data_source in self.get_all_data_sources():
-            frame_name = f'{data_source}_frame'
-            if hasattr(self, frame_name):
-                frame = getattr(self, frame_name)
+            # Get frame reference from data_source_widgets
+            frame = self.data_source_widgets.get(data_source, {}).get('frame')
+            if frame:
                 frame.destroy()
-                delattr(self, frame_name)
+                # Remove from data_source_widgets
+                if data_source in self.data_source_widgets:
+                    del self.data_source_widgets[data_source]['frame']
         
         # Recreate frames
         main_frame = self.root.winfo_children()[0]  # Get the main frame
@@ -1501,8 +1525,8 @@ class DatasheetGeneratorApp:
                     if key in self.data_sources[data_source]['coordinate_conversions']:
                         conv = self.data_sources[data_source]['coordinate_conversions'][key]
                         coord_display += f" [{conv.get('in_unit', '?')}->{conv.get('out_unit', '?')}]"
-                    if key in self.coordinate_combinations:
-                        combo = self.coordinate_combinations[key]
+                    if key in self.data_sources[data_source]['coordinate_combinations']:
+                        combo = self.data_sources[data_source]['coordinate_combinations'][key]
                         coord_display += f" [Combines: {', '.join(combo.get('combines', []))} ({combo.get('operation', 'add')})]"
                     listbox.insert(tk.END, coord_display)
             except tk.TclError:
@@ -1513,25 +1537,25 @@ class DatasheetGeneratorApp:
         def update_listboxes():
             """Update all listboxes for all data sources"""
             for data_source in self.get_all_data_sources():
-                listbox_name = f"{data_source}_listbox"
-                if hasattr(self, listbox_name):
+                # Get listbox reference from data_source_widgets
+                listbox = self.data_source_widgets.get(data_source, {}).get('listbox')
+                if listbox:
                     try:
-                        listbox = getattr(self, listbox_name)
                         # Check if the widget still exists before updating
                         if listbox.winfo_exists():
                             update_listbox(data_source, listbox)
                     except tk.TclError:
                         # Widget was destroyed, skip updating
-                        print(f"Warning: Could not update {listbox_name} - widget may have been destroyed")
+                        print(f"Warning: Could not update listbox for {data_source} - widget may have been destroyed")
                         continue
 
         def reinitialize():
             #init_excel()
             combo_values = get_combo_values()
             for data_source in self.get_all_data_sources():
-                combo_name = f"{data_source}_combo"
-                if hasattr(self, combo_name):
-                    combo = getattr(self, combo_name)
+                # Get combo reference from data_source_widgets
+                combo = self.data_source_widgets.get(data_source, {}).get('combo')
+                if combo:
                     combo['values'] = combo_values.get(data_source, [])
             update_listboxes()
 
@@ -1655,6 +1679,27 @@ IMPORTANT NOTES:
             
             help_btn = ttk.Button(top_tag_frame, text="?", width=3, command=show_top_tag_help)
             help_btn.pack(side="left", padx=(5, 0))
+            
+            # Partial match checkbox (only show for the specific data source)
+            partial_match_frame = ttk.Frame(top_frame)
+            partial_match_frame.pack(fill="x", pady=(0, 5))
+            
+            current_partial_match = self.data_sources[data_source].get('partial_match', False)
+            partial_match_var = tk.BooleanVar(value=current_partial_match)
+            partial_match_checkbox = tk.Checkbutton(partial_match_frame, 
+                                                   text="Use partial matching (find tag in cell text)", 
+                                                   variable=partial_match_var)
+            partial_match_checkbox.pack(side="left", padx=5)
+            
+            # Store reference to the partial match variable for this data source
+            self.data_source_ui_entries[data_source]['partial_match_var'] = partial_match_var
+            
+            def update_partial_match():
+                self.data_sources[data_source]['partial_match'] = partial_match_var.get()
+                print(f"Updated {name} partial_match to: {partial_match_var.get()}")
+            
+            # Bind checkbox to update function
+            partial_match_checkbox.config(command=update_partial_match)
 
         # Coordinate entry row with cell values and selection info
         coord_frame = ttk.Frame(top_frame)
@@ -1706,6 +1751,11 @@ IMPORTANT NOTES:
             # Combo box
             combo = ttk.Combobox(controls, values=combo_values.get(current_data_source, []), state="readonly")
             combo.pack(side="left", fill="x", expand=True, padx=5)
+            
+            # Store combo reference
+            if current_data_source not in self.data_source_widgets:
+                self.data_source_widgets[current_data_source] = {}
+            self.data_source_widgets[current_data_source]['combo'] = combo
 
             # Button frame
             btn_frame = ttk.Frame(data_frame)
@@ -1714,6 +1764,11 @@ IMPORTANT NOTES:
             # Listbox
             listbox = tk.Listbox(data_frame, height=8)
             listbox.pack(fill="both", expand=True, padx=5, pady=5)
+            
+            # Store listbox reference
+            if current_data_source not in self.data_source_widgets:
+                self.data_source_widgets[current_data_source] = {}
+            self.data_source_widgets[current_data_source]['listbox'] = listbox
 
             # Buttons
             ttk.Button(btn_frame, text=f"Add",
@@ -1766,9 +1821,7 @@ IMPORTANT NOTES:
             ttk.Button(btn_frame, text="AutoMap",
                        command=lambda dt=current_data_source, cb=combo: automap_coordinate(dt, cb)).pack(side="left", padx=2)
 
-            # Store references for later use
-            setattr(self, f"{current_data_source}_combo", combo)
-            setattr(self, f"{current_data_source}_listbox", listbox)
+            # References are already stored in data_source_widgets above
 
         
         # Semantic mapping controls (moved to right frame)
@@ -1844,7 +1897,7 @@ IMPORTANT NOTES:
                 self.coord_context_menu.entryconfig("Remove Conversion", state="disabled")
 
             # Check if combination exists and enable/disable "Remove Combination"
-            if self.selected_coord_for_context in self.coordinate_combinations:
+            if self.selected_coord_for_context in self.data_sources[data_source]['coordinate_combinations']:
                 self.coord_context_menu.entryconfig("Remove Combination", state="normal")
             else:
                 self.coord_context_menu.entryconfig("Remove Combination", state="disabled")
@@ -1879,7 +1932,9 @@ IMPORTANT NOTES:
                     coordinate_data['conversions'] = {}
                     for data_source in self.get_all_data_sources():
                         coordinate_data['conversions'][data_source] = self.data_sources[data_source]['coordinate_conversions']
-                    coordinate_data['combinations'] = self.coordinate_combinations
+                    coordinate_data['combinations'] = {}
+                    for data_source in self.get_all_data_sources():
+                        coordinate_data['combinations'][data_source] = self.data_sources[data_source]['coordinate_combinations']
                     
                     with open(file_path, 'w') as f:
                         json.dump(coordinate_data, f, indent=2)
@@ -1906,18 +1961,13 @@ IMPORTANT NOTES:
                     
                     # Load coordinate conversions and combinations
                     if 'conversions' in coordinate_data:
-                        # Handle both old format (global) and new format (per-data-source)
-                        if isinstance(coordinate_data['conversions'], dict):
-                            # New format: per-data-source conversions
-                            for data_source in self.get_all_data_sources():
-                                if data_source in coordinate_data['conversions']:
-                                    self.data_sources[data_source]['coordinate_conversions'] = coordinate_data['conversions'][data_source]
-                        else:
-                            # Old format: global conversions (for backward compatibility)
-                            for data_source in self.get_all_data_sources():
-                                self.data_sources[data_source]['coordinate_conversions'] = coordinate_data['conversions']
+                        for data_source in self.get_all_data_sources():
+                            if data_source in coordinate_data['conversions']:
+                                self.data_sources[data_source]['coordinate_conversions'] = coordinate_data['conversions'][data_source]
                     if 'combinations' in coordinate_data:
-                        self.coordinate_combinations = coordinate_data['combinations']
+                        for data_source in self.get_all_data_sources():
+                            if data_source in coordinate_data['combinations']:
+                                self.data_sources[data_source]['coordinate_combinations'] = coordinate_data['combinations'][data_source]
                     
                     # Update the UI
                     update_listboxes()
@@ -2140,10 +2190,10 @@ IMPORTANT NOTES:
         # Refresh all configuration tabs within each data source tab
         for data_source in data_sources:
             print(f"DEBUG: Refreshing tabs for data_source: {data_source}")
-            config_notebook_name = f'{data_source}_config_notebook'
-            if hasattr(self, config_notebook_name):
-                print(f"DEBUG: Found config notebook: {config_notebook_name}")
-                config_notebook = getattr(self, config_notebook_name)
+            # Get config_notebook reference from data_source_widgets
+            config_notebook = self.data_source_widgets.get(data_source, {}).get('config_notebook')
+            if config_notebook:
+                print(f"DEBUG: Found config notebook for {data_source}")
                 
                 # Only rebuild if forced or if tabs don't exist
                 existing_tabs = config_notebook.winfo_children()
@@ -2405,7 +2455,7 @@ IMPORTANT NOTES:
         print("Generating Coordinate-Value Data")
         self.tag_cell_values = {}  # 'a1':'LINE', 'a2':'PID' ...
         
-        def process_coordinate_value(coordinate, raw_value):
+        def process_coordinate_value(coordinate, raw_value, data_source):
             """Helper function to process a coordinate value with conversions and combinations"""
             if raw_value is None:
                 return None
@@ -2427,9 +2477,9 @@ IMPORTANT NOTES:
             
             return raw_value
         
-        def apply_combinations(data):
+        def apply_combinations(data, data_source):
             """Apply coordinate combinations to the data dictionary"""
-            for coord, combo_info in self.coordinate_combinations.items():
+            for coord, combo_info in self.data_sources[data_source]['coordinate_combinations'].items():
                 if coord in data:  # Skip if the target coordinate already has a value
                     continue
                     
@@ -2524,75 +2574,18 @@ IMPORTANT NOTES:
                 for coordinate, value in coordinate_values.items():
                     print(f'{primary_data_source} tag {tag}, value {value}, coord {coordinate}')
                     raw_value = data_source_data[tag].get(value) # Use .get() for safety
-                    processed_value = process_coordinate_value(coordinate, raw_value)
+                    processed_value = process_coordinate_value(coordinate, raw_value, primary_data_source)
                     data[coordinate] = processed_value
                     if processed_value is None:
                         print(f"  Warning: Key '{value}' not found in {primary_data_source} for tag '{tag}'. Skipping coordinate '{coordinate}'.")
 
                 # Apply combinations to the data
-                apply_combinations(data)
+                apply_combinations(data, primary_data_source)
 
                 self.tag_cell_values[tag] = data
 
         print("Coordinate Values generated:", self.tag_cell_values)
     
-    def assign_value_coordinate_to_tag_simple_dynamic(self):
-        """Simplified dynamic version that works with any data sources"""
-        print("Generating Coordinate-Value Data (Dynamic)")
-        self.tag_cell_values = {}
-        
-        # Get the primary data source (explicitly configured)
-        primary_data_source = self.get_primary_data_source()
-        primary_data = self.data_sources[primary_data_source]['data']
-        
-        if not primary_data:
-            print(f"No data available for {primary_data_source}")
-            return
-        
-        # Process each item in the primary data source
-        for item_key, item_data in primary_data.items():
-            if not item_key:
-                continue
-            
-            # Apply filters if they exist
-            if 'tag_filters' in self.data_sources[primary_data_source] and self.data_sources[primary_data_source]['tag_filters']:
-                continue_flag = False
-                for header, filter_key in self.data_sources[primary_data_source]['tag_filters']:
-                    acceptable_values = [value.strip() for value in filter_key.split(',')]
-                    if item_data.get(header) not in acceptable_values:
-                        continue_flag = True
-                        break
-                
-                if continue_flag:
-                    continue
-            
-            # Process coordinates for all data sources
-            data = {}
-            
-            # Process coordinates for each data source
-            for data_source in self.get_all_data_sources():
-                coordinate_values = self.data_sources[data_source]['coordinate_values']
-                data_source_data = self.data_sources[data_source]['data']
-                
-                if not data_source_data:
-                    continue
-                
-                # For primary data source, use the item directly
-                if data_source == primary_data_source:
-                    for coordinate, value in coordinate_values.items():
-                        raw_value = item_data.get(value)
-                        data[coordinate] = raw_value
-                else:
-                    # For other data sources, try to find matching data
-                    # This is a simplified approach - you might need more complex logic
-                    for coordinate, value in coordinate_values.items():
-                        # Try to find matching data based on some key
-                        # This is where you'd implement your specific logic
-                        data[coordinate] = None  # Placeholder
-            
-            self.tag_cell_values[item_key] = data
-        
-        print("Coordinate Values generated (Dynamic):", self.tag_cell_values)
 
     def check_halt_flag(self):
         """Callback function to check if the process should be halted"""
@@ -2659,8 +2652,8 @@ IMPORTANT NOTES:
             self.rounding_tolerance = float(entry_values.get('rounding_tolerance', self.rounding_tolerance))
             
             # STEP 2: Get data_source SPECIFIC values directly from UI entries
-            primary_source_sheet_name, primary_top_tag = self.get_data_source_ui_values(primary_data_source)
-            print(f'DEBUG: data source UI values for {primary_data_source}: source_sheet={primary_source_sheet_name}, top_tag={primary_top_tag}')
+            primary_source_sheet_name, primary_top_tag, primary_partial_match = self.get_data_source_ui_values(primary_data_source)
+            print(f'DEBUG: data source UI values for {primary_data_source}: source_sheet={primary_source_sheet_name}, top_tag={primary_top_tag}, partial_match={primary_partial_match}')
             
             # Store the source sheet name for the report
             self.last_used_source_sheet = primary_source_sheet_name
@@ -2686,6 +2679,8 @@ IMPORTANT NOTES:
             if color_option == "None (Black)":
                 color_option = None
             print('color_option', color_option)
+            print('partial_match', primary_partial_match)
+            
             self.new_sheets = add_update_datasheets(self.excel_mgr.wb, primary_source_sheet_name,
                                             self.tag_cell_values, self.datasheet_coord,
                                             self.ds_str, rows_per_sheet=self.rows_per_sheet,
@@ -2693,7 +2688,8 @@ IMPORTANT NOTES:
                                             sig_figs=self.sig_figs, # Pass sig_figs
                                             tolerance=self.rounding_tolerance, # Pass tolerance
                                             halt_callback=self.check_halt_flag, # Pass halt callback
-                                            cell_update_option=color_option) # Pass color coding option
+                                            cell_update_option=color_option, # Pass color coding option
+                                            partial_match=primary_partial_match) # Pass partial match option
             self.excel_mgr.mark_as_modified()
             
             if self.halt_flag:
@@ -2748,9 +2744,8 @@ IMPORTANT NOTES:
                 messagebox.showerror("Error", "Invalid settings file format.")
                 return
             
-            # Load entry values
-            if 'entry_values' in settings_data:
-                self.set_entry_values(settings_data['entry_values'])
+            # Store entry values to apply after UI rebuild
+            saved_entry_values = settings_data.get('entry_values', {})
             
             # Load default settings (legacy support - no longer used)
             if 'default_settings' in settings_data:
@@ -2788,12 +2783,17 @@ IMPORTANT NOTES:
             # Repopulate the entries list after UI refresh
             self.repopulate_entries_list()
             
+            # NOW set entry values after UI has been rebuilt and entries repopulated
+            if saved_entry_values:
+                self.set_entry_values(saved_entry_values)
+            
             # Set data_source specific UI entries after UI is refreshed
             if 'data_sources' in settings_data:
                 for data_source, config in settings_data['data_sources'].items():
                     source_sheet_name = config.get('source_sheet_name', '')
                     top_tag = config.get('top_tag', '')
-                    self.set_data_source_ui_values(data_source, source_sheet_name, top_tag)
+                    partial_match = config.get('partial_match', False)
+                    self.set_data_source_ui_values(data_source, source_sheet_name, top_tag, partial_match)
             
             
             messagebox.showinfo("Success", f"Settings loaded successfully from:\n{file_path}")
@@ -2834,11 +2834,12 @@ IMPORTANT NOTES:
             # Save data sources configuration
             for data_source, config in self.data_sources.items():
                 # Get current values from UI entries for this data source
-                ui_source_sheet, ui_top_tag = self.get_data_source_ui_values(data_source)
+                ui_source_sheet, ui_top_tag, ui_partial_match = self.get_data_source_ui_values(data_source)
                 
                 # Update config with current UI values
                 config['top_tag'] = ui_top_tag
                 config['source_sheet_name'] = ui_source_sheet
+                config['partial_match'] = ui_partial_match
                 
                 settings_data['data_sources'][data_source] = {
                     'headers': config.get('headers', []),
@@ -2931,30 +2932,48 @@ IMPORTANT NOTES:
     
     def set_entry_values(self, entry_values):
         """Set values to all entry widgets"""
+        print(f"\nDEBUG set_entry_values: Setting {len(entry_values)} values")
+        print(f"DEBUG set_entry_values: Available entries: {len(self.entries)}")
+        for entry, var in self.entries:
+            print(f"  - Entry for: {var}")
+        
         for variable, value in entry_values.items():
+            print(f"\nDEBUG: Trying to set '{variable}' = '{value}'")
             try:
+                found = False
                 # Find the corresponding entry widget
                 for entry, var in self.entries:
                     if var == variable:
+                        found = True
+                        print(f"  -> Found matching entry widget for '{variable}'")
                         # Handle different widget types
                         if hasattr(entry, 'delete') and hasattr(entry, 'insert'):
                             # Standard Entry widget
                             entry.delete(0, tk.END)
                             entry.insert(0, str(value))
+                            print(f"  -> Set entry widget value to '{value}'")
                         elif hasattr(entry, 'set'):
                             # Combobox widget
                             entry.set(str(value))
+                            print(f"  -> Set combobox value to '{value}'")
                         elif hasattr(entry, 'delete') and hasattr(entry, 'insert'):
                             # Text widget
                             entry.delete(1.0, tk.END)
                             entry.insert(1.0, str(value))
+                            print(f"  -> Set text widget value to '{value}'")
                         break
-                else:
+                
+                if not found:
                     # Check if this is a data source variable
                     if variable in self.data_sources:
+                        print(f"  -> Not found in entries, but is a data source. Setting config.")
                         self.data_sources[variable]['path'] = value
+                    else:
+                        print(f"  -> WARNING: Variable '{variable}' not found in entries or data sources!")
             except Exception as e:
                 print(f"Error setting entry value for {variable}: {e}")
+                import traceback
+                traceback.print_exc()
     
     def get_dynamic_attributes(self):
         """Get any additional dynamic attributes that are important for the application state"""
@@ -3057,23 +3076,15 @@ IMPORTANT NOTES:
 
     # region Data Display
 
-    def view_data(self, text):
+    def view_data(self, data_source=None):
+        """View data for a data source or special case"""
 
-        print(f"Viewing {text}")
-
-        if text == "Coordinate-Value Data":
-            # open a new tkinter popup window with a scroll bar showing all the coordinate-value pairs
-            self.display_coordinate_values()
-        elif text == "Datasheets":
-            # open the datasheets file
-            os.startfile(self.destination_datasheet)
+        # New approach - data_source parameter
+        if data_source and data_source in self.data_sources:
+            print(f"Viewing {data_source}")
+            self.display_data_source(data_source)
         else:
-            # Check if it's a data source
-            data_source = text if text in self.data_sources else None
-            if data_source:
-                self.display_data_source(data_source)
-            else:
-                print(f"Unknown data source: {text}")
+            print(f"Unknown data source: {data_source}")
     
     def display_data_source(self, data_source):
         """Display data for any data source using the centralized system"""
@@ -3411,23 +3422,7 @@ The datasheets have been generated and are ready for use."""
 
 
 
-    def browse_data_source(self, entry, data_source):
-        """Browse for a file for a specific data source"""
-        # Allow both JSON and Excel files
-        filename = filedialog.askopenfilename(
-            filetypes=[("All supported files", "*.json;*.xlsx;*.xls"), 
-                      ("JSON files", "*.json"), 
-                      ("Excel files", "*.xlsx;*.xls"),
-                      ("All files", "*.*")]
-        )
-        
-        # Only update the entry if a file was actually selected (not canceled)
-        if filename:
-            entry.delete(0, tk.END)
-            entry.insert(0, filename)
-            # Update the data source path in config
-            self.data_sources[data_source]['path'] = filename
-            print(f"Set {data_source} path to {filename}")
+
 
     def browse_coordinate_value(self, entry):
         """Browse for coordinate value file"""
@@ -3503,8 +3498,8 @@ The datasheets have been generated and are ready for use."""
 
     def configure(self, text):
         print(f"Configure {text}")
-
-            # Find the data source by name
+        
+        # Find the data source by name
         data_source = text  # Direct reference since text is the data source name
         if data_source:
             self.configure_data_source(data_source)
@@ -3562,27 +3557,45 @@ The datasheets have been generated and are ready for use."""
             # Get the stored entry references from the dictionary
             if not hasattr(self, 'data_source_ui_entries') or data_source not in self.data_source_ui_entries:
                 print(f"No UI entries found for {data_source}")
-                return None, None
+                return None, None, False
             
             entries = self.data_source_ui_entries[data_source]
             source_sheet_entry = entries.get('source_sheet_entry')
             top_tag_entry = entries.get('top_tag_entry')
+            partial_match_var = entries.get('partial_match_var')
             
-            if not source_sheet_entry or not top_tag_entry:
-                print(f"Incomplete UI entries found for {data_source}")
-                return None, None
+            print(f"DEBUG: Found entries for {data_source}: source_sheet_entry={source_sheet_entry is not None}, top_tag_entry={top_tag_entry is not None}")
             
-            # Get values directly from the entries
-            source_sheet_name = source_sheet_entry.get().strip()
-            top_tag = top_tag_entry.get().strip()
+            # Handle missing UI entries - get from config if available
+            if not source_sheet_entry:
+                print(f"No source_sheet_entry found for {data_source}")
+                source_sheet_name = None
+            else:
+                source_sheet_name = source_sheet_entry.get().strip()
             
-            return source_sheet_name, top_tag
+            if not top_tag_entry:
+                print(f"No top_tag_entry found for {data_source}, using config value")
+                # Fallback to config value if UI entry doesn't exist yet
+                top_tag = self.data_sources[data_source].get('top_tag', '') if data_source in self.data_sources else ''
+            else:
+                top_tag = top_tag_entry.get().strip()
+            
+            if not partial_match_var:
+                print(f"No partial_match_var found for {data_source}, using config value")
+                # Fallback to config value if UI entry doesn't exist yet
+                partial_match = self.data_sources[data_source].get('partial_match', False) if data_source in self.data_sources else False
+            else:
+                partial_match = partial_match_var.get()
+            
+            print(f"DEBUG: Retrieved values for {data_source}: source_sheet='{source_sheet_name}', top_tag='{top_tag}', partial_match={partial_match}")
+            
+            return source_sheet_name, top_tag, partial_match
             
         except Exception as e:
             print(f"Error getting UI values for data source {data_source}: {e}")
-            return None, None
+            return None, None, False
     
-    def set_data_source_ui_values(self, data_source, source_sheet_name, top_tag):
+    def set_data_source_ui_values(self, data_source, source_sheet_name, top_tag, partial_match=False):
         """Set values to data_source specific UI entries"""
         try:
             # Get the stored entry references from the dictionary
@@ -3593,6 +3606,7 @@ The datasheets have been generated and are ready for use."""
             entries = self.data_source_ui_entries[data_source]
             source_sheet_entry = entries.get('source_sheet_entry')
             top_tag_entry = entries.get('top_tag_entry')
+            partial_match_var = entries.get('partial_match_var')
             
             if not source_sheet_entry or not top_tag_entry:
                 print(f"Incomplete UI entries found for {data_source}")
@@ -3604,6 +3618,8 @@ The datasheets have been generated and are ready for use."""
             if top_tag:
                 top_tag_entry.delete(0, tk.END)
                 top_tag_entry.insert(0, top_tag)
+            if partial_match_var:
+                partial_match_var.set(partial_match)
             
             return True
             
@@ -3891,7 +3907,10 @@ The datasheets have been generated and are ready for use."""
             return
 
         coord = self.selected_coord_for_context
-        existing_combination = self.coordinate_combinations.get(coord, {})
+        data_source = self.current_data_source_for_context
+        if not data_source:
+            return
+        existing_combination = self.data_sources[data_source]['coordinate_combinations'].get(coord, {})
 
         dialog = Toplevel(self.root)
         dialog.title(f"Coordinate Combination for {coord}")
@@ -3999,11 +4018,14 @@ The datasheets have been generated and are ready for use."""
                 messagebox.showerror("Invalid Input", "Please select at least one coordinate to combine.", parent=dialog)
                 return
 
-            self.coordinate_combinations[coord] = {
+            data_source = self.current_data_source_for_context
+            if not data_source:
+                return
+            self.data_sources[data_source]['coordinate_combinations'][coord] = {
                 'operation': operation,
                 'combines': combines
             }
-            print(f"Saved combination for {coord}: {self.coordinate_combinations[coord]}")
+            print(f"Saved combination for {coord}: {self.data_sources[data_source]['coordinate_combinations'][coord]}")
 
             # Update listboxes
             # Find the current data source tab and its coordinates tab
@@ -4028,9 +4050,10 @@ The datasheets have been generated and are ready for use."""
         self.root.wait_window(dialog)
 
     def remove_combination(self):
-        if self.selected_coord_for_context and self.selected_coord_for_context in self.coordinate_combinations:
+        data_source = self.current_data_source_for_context
+        if data_source and self.selected_coord_for_context and self.selected_coord_for_context in self.data_sources[data_source]['coordinate_combinations']:
             coord = self.selected_coord_for_context
-            del self.coordinate_combinations[coord]
+            del self.data_sources[data_source]['coordinate_combinations'][coord]
             print(f"Removed combination for {coord}")
             # Update listboxes
             # Find the current data source tab and its coordinates tab
@@ -4515,8 +4538,8 @@ The datasheets have been generated and are ready for use."""
             successful_mappings, mapping_results = self.process_cells_for_automap(data_source, cell_addresses, min_score)
             
             # Update the listbox to show all new mappings
-            if hasattr(self, f"{data_source}_listbox"):
-                listbox_obj = getattr(self, f"{data_source}_listbox")
+            listbox_obj = self.data_source_widgets.get(data_source, {}).get('listbox')
+            if listbox_obj:
                 self.update_single_listbox(data_source, listbox_obj)
             
             # Show results summary
@@ -4566,8 +4589,8 @@ The datasheets have been generated and are ready for use."""
                 print(f"Range {i+1} completed: {successful_mappings} mappings")
             
             # Update the listbox to show all new mappings
-            if hasattr(self, f"{data_source}_listbox"):
-                listbox_obj = getattr(self, f"{data_source}_listbox")
+            listbox_obj = self.data_source_widgets.get(data_source, {}).get('listbox')
+            if listbox_obj:
                 self.update_single_listbox(data_source, listbox_obj)
             
             # Show results summary
@@ -4600,8 +4623,8 @@ The datasheets have been generated and are ready for use."""
             if key in self.data_sources[data_source]['coordinate_conversions']:
                 conv = self.data_sources[data_source]['coordinate_conversions'][key]
                 coord_display += f" [{conv.get('in_unit', '?')}->{conv.get('out_unit', '?')}]"
-            if key in self.coordinate_combinations:
-                combo = self.coordinate_combinations[key]
+            if key in self.data_sources[data_source]['coordinate_combinations']:
+                combo = self.data_sources[data_source]['coordinate_combinations'][key]
                 coord_display += f" [Combines: {', '.join(combo.get('combines', []))} ({combo.get('operation', 'add')})]"
             listbox.insert(tk.END, coord_display)
 

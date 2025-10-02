@@ -383,10 +383,13 @@ class DatasheetExtractor:
             wb = openpyxl.load_workbook(filepath, read_only=True)
             self.all_sheets = wb.sheetnames
             wb.close()
+            # Initialize filtered_sheets with all sheets
+            self.filtered_sheets = self.all_sheets.copy()
             self.update_sheet_listbox()
         except Exception as e:
             messagebox.showerror("Error", f"Could not load sheets from file: {str(e)}")
             self.all_sheets = []
+            self.filtered_sheets = []
             self.update_sheet_listbox()
 
     def update_sheet_listbox(self):
