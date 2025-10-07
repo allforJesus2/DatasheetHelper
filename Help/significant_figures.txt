@@ -1,0 +1,26 @@
+Significant Figures
+===================
+
+Controls the number of significant figures to display for numerical values in the output.
+
+Usage:
+- Enter a positive integer (e.g., 3, 4, 5)
+- Leave blank to keep original precision
+- Applies to all numeric fields being extracted
+
+Examples:
+- "3" - Display numbers like 1.23, 12.3, 123
+- "4" - Display numbers like 1.234, 12.34, 123.4
+- "5" - Display numbers like 1.2345, 12.345, 123.45
+
+Technical Details:
+- Uses significant figures, not decimal places
+- Counts all non-zero digits and zeros between non-zero digits
+- Scientific notation is used for very large or small numbers
+
+Tips:
+- Match the precision of your source data or measurement equipment
+- More figures = more storage space and potentially false precision
+- Consider the context: electrical specs may need 3-4, mechanical may need 2-3
+- Use with "Rounding Tolerance" for intelligent rounding
+

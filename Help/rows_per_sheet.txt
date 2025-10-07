@@ -1,0 +1,21 @@
+Rows per Sheet
+==============
+
+Defines the maximum number of data rows to place in each sheet before creating a new sheet.
+
+Usage:
+- Enter a positive integer (e.g., 100, 500, 1000)
+- Leave blank or enter 0 for no limit (all data in one sheet per source)
+- When the row limit is reached, a new sheet will be created automatically
+
+Examples:
+- "100" - Create a new sheet after every 100 rows of data
+- "500" - Suitable for larger datasets while keeping sheets manageable
+- "" (blank) - All data goes into a single sheet (may become unwieldy for large datasets)
+
+Tips:
+- Excel's maximum rows per sheet is 1,048,576, but smaller sheets are easier to navigate
+- Consider your viewing and printing needs when setting this value
+- Smaller values (100-500) work well for detailed review tasks
+- Larger values or unlimited work better for programmatic data processing
+

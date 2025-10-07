@@ -235,6 +235,10 @@ class DatasheetGeneratorApp:
         self.halt_flag = False  # Flag to control halting of add_update_datasheets
         self.is_processing = False  # Flag to track if datasheet generation is running
         
+        # Settings file tracking
+        self.current_settings_file = None  # Track the currently loaded/saved settings file
+        self.last_settings_file_path = "last_settings_file.txt"  # File to store the last settings file path
+        
         # Centralized data source definitions
         print("DEBUG: Setting up data source definitions...")
         self.data_sources = {}
@@ -249,6 +253,13 @@ class DatasheetGeneratorApp:
         self.semantic_model = None
         self.model_loaded = False
         self.loading_model = False
+        print(f"DEBUG: Initial state - semantic_model: {self.semantic_model}, model_loaded: {self.model_loaded}, loading_model: {self.loading_model}")
+        
+        # Safety check: If model_loaded is True but semantic_model is None (from bad state restore), reset the flags
+        if self.model_loaded and self.semantic_model is None:
+            print("DEBUG: WARNING - Found inconsistent state (model_loaded=True but semantic_model=None). Resetting flags.")
+            self.model_loaded = False
+            self.loading_model = False
         
         # Centralized Excel selection monitoring
         self.current_excel_selection = None
@@ -267,6 +278,9 @@ class DatasheetGeneratorApp:
         
         # Start centralized Excel monitoring
         self.start_excel_monitoring()
+        
+        # Auto-load the last settings file if it exists
+        self.auto_load_last_settings()
     
 
     
@@ -505,12 +519,16 @@ class DatasheetGeneratorApp:
         """Get the primary data source (currently selected tab)"""
         if hasattr(self, 'data_sources_notebook'):
             try:
-                # Get the currently selected tab index
-                selected_index = self.data_sources_notebook.index(self.data_sources_notebook.select())
-                # Get all data sources in the same order as tabs
-                data_sources = list(self.get_all_data_sources())
-                if 0 <= selected_index < len(data_sources):
-                    return data_sources[selected_index]
+                # Get the currently selected tab
+                selected_tab = self.data_sources_notebook.select()
+                if selected_tab:
+                    # Get the tab text which contains the data source name
+                    tab_text = self.data_sources_notebook.tab(selected_tab, "text")
+                    # Remove checkmark if present
+                    data_source = tab_text.replace(" ✓", "").strip()
+                    # Verify this data source exists
+                    if data_source in self.data_sources:
+                        return data_source
             except Exception as e:
                 print(f"Error getting selected tab: {e}")
         
@@ -796,8 +814,31 @@ class DatasheetGeneratorApp:
         # Remove old data source
         del self.data_sources[old_data_source]
         
-        # Simply update the tab text instead of recreating everything
-        self.update_tab_text(old_data_source, new_data_source)
+        # Find and recreate the tab to update all bindings
+        if hasattr(self, 'data_sources_notebook'):
+            for i in range(self.data_sources_notebook.index("end")):
+                tab_text = self.data_sources_notebook.tab(i, "text")
+                base_tab_text = tab_text.replace(" ✓", "")
+                
+                if base_tab_text == old_data_source:
+                    # Get the tab widget
+                    tab_widget = self.data_sources_notebook.nametowidget(self.data_sources_notebook.tabs()[i])
+                    
+                    # Destroy all children of the tab to clear it
+                    for child in tab_widget.winfo_children():
+                        child.destroy()
+                    
+                    # Recreate the full tab content with the new data source name
+                    self.create_data_source_tab_content(tab_widget, new_data_source, self.data_sources[new_data_source])
+                    
+                    # Update the tab text
+                    if " ✓" in tab_text:
+                        new_tab_text = f"{new_data_source} ✓"
+                    else:
+                        new_tab_text = new_data_source
+                    self.data_sources_notebook.tab(i, text=new_tab_text)
+                    print(f"Recreated tab content for renamed data source: {new_data_source}")
+                    break
         
         messagebox.showinfo("Success", f"data source renamed from '{old_data_source}' to '{new_data_source}'")
     
@@ -1005,9 +1046,14 @@ class DatasheetGeneratorApp:
         source_sheet_row = tk.Frame(source_sheet_frame)
         source_sheet_row.pack(fill=tk.X, padx=5, pady=5)
         
+        # Help button
+        source_help_btn = tk.Button(source_sheet_row, text="?", width=2,
+                                    command=lambda: self.show_help("source_sheet_name.txt"))
+        source_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
         # Label
         source_sheet_label = tk.Label(source_sheet_row, text="Source Sheet Name:", width=20)
-        source_sheet_label.pack(side=tk.LEFT, padx=5)
+        source_sheet_label.pack(side=tk.LEFT, padx=(0, 5))
         
         # Combobox for source sheet name (allows typing and dropdown selection)
         source_sheet_entry = ttk.Combobox(source_sheet_row, state="normal")
@@ -1173,6 +1219,38 @@ class DatasheetGeneratorApp:
 
         #self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+    def show_help(self, help_file):
+        """Display help text from a file in a popup window"""
+        help_path = os.path.join("Help", help_file)
+        
+        try:
+            with open(help_path, 'r', encoding='utf-8') as f:
+                help_text = f.read()
+        except FileNotFoundError:
+            help_text = f"Help file not found: {help_file}"
+        except Exception as e:
+            help_text = f"Error loading help: {str(e)}"
+        
+        # Create help window
+        help_window = tk.Toplevel(self.root)
+        help_window.title("Help")
+        help_window.geometry("600x400")
+        help_window.transient(self.root)
+        
+        # Center over the main window
+        center_window_over_parent(help_window)
+        
+        # Create scrolled text widget
+        text_widget = scrolledtext.ScrolledText(help_window, wrap=tk.WORD, font=("Consolas", 10))
+        text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Insert help text
+        text_widget.insert(1.0, help_text)
+        text_widget.configure(state='disabled')
+        
+        # Add close button
+        close_button = tk.Button(help_window, text="Close", command=help_window.destroy, width=10)
+        close_button.pack(pady=(0, 10))
 
     def create_widgets(self):
         print("DEBUG: Starting create_widgets...")
@@ -1181,16 +1259,28 @@ class DatasheetGeneratorApp:
         self.menu_bar = tk.Menu(self.root)
         self.root.config(menu=self.menu_bar)
 
+        # Create File menu
+        print("DEBUG: Creating File menu...")
+        self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="File", menu=self.file_menu)
+        
+        # Add File menu items
+        self.file_menu.add_command(label="Load Settings", command=self.load_settings)
+        self.file_menu.add_command(label="Save", command=self.save_settings, accelerator="Ctrl+S")
+        self.file_menu.add_command(label="Save As", command=self.save_settings_as, accelerator="Ctrl+Shift+S")
+        
+        # Bind keyboard shortcuts
+        self.root.bind('<Control-s>', lambda e: self.save_settings())
+        self.root.bind('<Control-Shift-S>', lambda e: self.save_settings_as())
+
         # Create Commands menu
         print("DEBUG: Creating Commands menu...")
         self.command_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="Commands", menu=self.command_menu)
 
-        # Add menu items
+        # Add menu items (Load/Save Settings removed - now in File menu)
         print("DEBUG: Setting up menu commands...")
         menu_commands = [
-            ("Load Settings", self.load_settings),
-            ("Save Settings", self.save_settings),
             ("Run xlsx search app", self.open_excel_search_app),
             ("Populate Headers on Datasheets", self.open_edit_xlsx),
             ("View Coordinate Value Data", self.display_coordinate_values),
@@ -1262,8 +1352,13 @@ class DatasheetGeneratorApp:
         ds_frame = tk.Frame(left_section)
         ds_frame.pack(fill=tk.X, pady=5)
 
+        # Help button
+        ds_help_btn = tk.Button(ds_frame, text="?", width=2, 
+                                command=lambda: self.show_help("datasheets_destination.txt"))
+        ds_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+
         ds_label = tk.Label(ds_frame, text="Datasheets (Destination)", width=30)
-        ds_label.pack(side=tk.LEFT, padx=5)
+        ds_label.pack(side=tk.LEFT, padx=(0, 5))
 
         ds_entry = tk.Entry(ds_frame)
         ds_entry._variable_name = "datasheets"  # Store variable name for repopulation
@@ -1284,8 +1379,13 @@ class DatasheetGeneratorApp:
         coord_frame = tk.Frame(left_section)
         coord_frame.pack(fill=tk.X, pady=5)
 
+        # Help button
+        coord_help_btn = tk.Button(coord_frame, text="?", width=2, 
+                                   command=lambda: self.show_help("datasheet_coordinate.txt"))
+        coord_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+
         coord_label = tk.Label(coord_frame, text="Datasheet Coordinate", width=30)
-        coord_label.pack(side=tk.LEFT, padx=5)
+        coord_label.pack(side=tk.LEFT, padx=(0, 5))
 
         coord_entry = tk.Entry(coord_frame)
         coord_entry._variable_name = "datasheet_coord"  # Store variable name for repopulation
@@ -1298,8 +1398,13 @@ class DatasheetGeneratorApp:
         prefix_frame = tk.Frame(left_section)
         prefix_frame.pack(fill=tk.X, pady=5)
 
+        # Help button
+        prefix_help_btn = tk.Button(prefix_frame, text="?", width=2, 
+                                    command=lambda: self.show_help("datasheet_prefix.txt"))
+        prefix_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+
         prefix_label = tk.Label(prefix_frame, text="Datasheet Prefix", width=30)
-        prefix_label.pack(side=tk.LEFT, padx=5)
+        prefix_label.pack(side=tk.LEFT, padx=(0, 5))
 
         prefix_entry = tk.Entry(prefix_frame)
         prefix_entry._variable_name = "ds_str"  # Store variable name for repopulation
@@ -1312,8 +1417,13 @@ class DatasheetGeneratorApp:
         rows_frame = tk.Frame(left_section)
         rows_frame.pack(fill=tk.X, pady=5)
 
+        # Help button
+        rows_help_btn = tk.Button(rows_frame, text="?", width=2, 
+                                  command=lambda: self.show_help("rows_per_sheet.txt"))
+        rows_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+
         rows_label = tk.Label(rows_frame, text="Rows per Sheet", width=30)
-        rows_label.pack(side=tk.LEFT, padx=5)
+        rows_label.pack(side=tk.LEFT, padx=(0, 5))
 
         rows_entry = tk.Entry(rows_frame)
         rows_entry._variable_name = "rows_per_sheet"  # Store variable name for repopulation
@@ -1326,8 +1436,13 @@ class DatasheetGeneratorApp:
         sig_figs_frame = tk.Frame(left_section)
         sig_figs_frame.pack(fill=tk.X, pady=5)
 
+        # Help button
+        sig_figs_help_btn = tk.Button(sig_figs_frame, text="?", width=2, 
+                                      command=lambda: self.show_help("significant_figures.txt"))
+        sig_figs_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+
         sig_figs_label = tk.Label(sig_figs_frame, text="Significant Figures", width=30)
-        sig_figs_label.pack(side=tk.LEFT, padx=5)
+        sig_figs_label.pack(side=tk.LEFT, padx=(0, 5))
 
         sig_figs_entry = tk.Entry(sig_figs_frame)
         sig_figs_entry._variable_name = "sig_figs"  # Store variable name for repopulation
@@ -1340,8 +1455,13 @@ class DatasheetGeneratorApp:
         tolerance_frame = tk.Frame(left_section)
         tolerance_frame.pack(fill=tk.X, pady=5)
 
+        # Help button
+        tolerance_help_btn = tk.Button(tolerance_frame, text="?", width=2, 
+                                       command=lambda: self.show_help("rounding_tolerance.txt"))
+        tolerance_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+
         tolerance_label = tk.Label(tolerance_frame, text="Rounding Tolerance", width=30)
-        tolerance_label.pack(side=tk.LEFT, padx=5)
+        tolerance_label.pack(side=tk.LEFT, padx=(0, 5))
 
         tolerance_entry = tk.Entry(tolerance_frame)
         tolerance_entry._variable_name = "rounding_tolerance"  # Store variable name for repopulation
@@ -1350,24 +1470,29 @@ class DatasheetGeneratorApp:
         # Store reference to global entry
         self.rounding_tolerance_entry = tolerance_entry
 
+        # === RIGHT SECTION: Action Buttons ===
+        
+        # Add title for the right section
+        action_title = tk.Label(right_section, text="ACTIONS", font=("Arial", 9, "bold"), fg="darkgreen")
+        action_title.pack(pady=(10, 5))
+
         # Color coding method
-        color_frame = tk.Frame(left_section)
+        color_frame = tk.Frame(right_section)
         color_frame.pack(fill=tk.X, pady=5)
 
+        # Help button
+        color_help_btn = tk.Button(color_frame, text="?", width=2, 
+                                   command=lambda: self.show_help("color_coding_method.txt"))
+        color_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+
         color_label = tk.Label(color_frame, text="Color Coding Method:", width=20)
-        color_label.pack(side=tk.LEFT, padx=5)
+        color_label.pack(side=tk.LEFT, padx=(0, 5))
 
         self.color_coding_var = tk.StringVar(value="new_red_old_green")
         color_dropdown = ttk.Combobox(color_frame, textvariable=self.color_coding_var, 
                                      values=["None (Black)", "new_red_old_green", "new_red"], 
                                      state="readonly", width=20)
         color_dropdown.pack(side=tk.LEFT, padx=5)
-
-        # === RIGHT SECTION: Action Buttons ===
-        
-        # Add title for the right section
-        action_title = tk.Label(right_section, text="ACTIONS", font=("Arial", 9, "bold"), fg="darkgreen")
-        action_title.pack(pady=(10, 5))
 
         # Add/Update button
         self.generate_button = tk.Button(right_section, text="Add/Update",
@@ -1451,57 +1576,10 @@ class DatasheetGeneratorApp:
             update_listboxes()
 
         def update_coordinate_display(full_selection, current_selection):
-            """Callback function for centralized Excel selection monitoring"""
+            """Callback function for centralized Excel selection monitoring - only updates coordinate entry"""
             try:
-                # Update coordinate entry
+                # Update coordinate entry only
                 entry_var.set(current_selection)
-                
-                # Update region display
-                try:
-                    clean_selection = full_selection.replace('$', '')
-                    
-                    if ',' in clean_selection:
-                        # Non-contiguous selection (multiple ranges separated by commas)
-                        ranges = clean_selection.split(',')
-                        range_descriptions = []
-                        for i, range_addr in enumerate(ranges):
-                            if ':' in range_addr:
-                                start_cell, end_cell = range_addr.split(':')
-                                range_descriptions.append(f"Range{i+1}: {start_cell}:{end_cell}")
-                            else:
-                                range_descriptions.append(f"Cell{i+1}: {range_addr}")
-                        
-                        # Create detailed display
-                        if len(ranges) <= 3:
-                            # Show all ranges if 3 or fewer
-                            region_var.set(f"Region: {', '.join(range_descriptions)}")
-                        else:
-                            # Show count if more than 3 ranges
-                            region_var.set(f"Region: {len(ranges)} Non-contiguous Ranges ({ranges[0]}, {ranges[1]}, ...)")
-                            
-                    elif ':' in clean_selection:
-                        # Single contiguous range
-                        start_cell, end_cell = clean_selection.split(':')
-                        region_var.set(f"Region: Range {start_cell}:{end_cell}")
-                    else:
-                        # Single cell selected
-                        region_var.set(f"Region: Single Cell {clean_selection}")
-                except Exception as e:
-                    region_var.set("Region: Single Cell")
-                
-                # Update cell values display
-                try:
-                    sheet = xw.apps.active.books.active.sheets.active
-                    above_value, left_value = self.get_cell_values_above_and_left(sheet, current_selection)
-                    
-                    # Simple truncation to prevent layout issues
-                    above_text = str(above_value)[:15] + "..." if above_value and len(str(above_value)) > 15 else (str(above_value) if above_value else "—")
-                    left_text = str(left_value)[:15] + "..." if left_value and len(str(left_value)) > 15 else (str(left_value) if left_value else "—")
-                    
-                    cell_values_var.set(f"Above: {above_text} | Left: {left_text}")
-                except Exception as e:
-                    cell_values_var.set("Above: — | Left: —")
-                    
             except Exception as e:
                 print(f"Error updating coordinate display: {e}")
         
@@ -1613,71 +1691,8 @@ class DatasheetGeneratorApp:
             ttk.Button(top_tag_frame, text="Update", command=update_top_tag).pack(side="left", padx=(5, 0))
             
             # Add help button for top tag
-            def show_top_tag_help():
-                help_text = """Top Tag - Key Coordinate
-
-This is the Excel cell coordinate (e.g., A1, I12) where the tag identifier is placed in each datasheet.
-
-WHAT IT DOES:
-• Places the dictionary key (tag identifier) at this coordinate
-• Serves as the anchor point for all tag-related operations
-• Used to identify existing tags when updating sheets
-• Used to place new tags when creating sheets
-• Calculates row offsets for positioning other data
-
-HOW IT WORKS WITH COORDINATE-VALUE DATA:
-The Top Tag and Coordinate-Value Data work together:
-
-1. TOP TAG: Determines WHERE the tag goes
-   - Places the dictionary key (e.g., "TAG-001") at the specified coordinate
-   - Example: If Top Tag = "A1", then "TAG-001" goes in cell A1
-
-2. COORDINATE-VALUE DATA: Determines WHAT data goes where
-   - Contains mapping of coordinates to values for each tag
-   - Example: {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}
-
-COMPLETE PROCESS FLOW:
-1. System reads your data: {"TAG-001": {"B1": "Line 1", "C1": "PID-001"}}
-2. Top Tag places "TAG-001" at the key coordinate (e.g., A1)
-3. Coordinate-Value Data places "Line 1" at B1, "PID-001" at C1, etc.
-
-EXAMPLE WITH DETAILS:
-If Top Tag = "A1" and you have data like:
-{"TAG-001": {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}}
-
-Result in Excel:
-• Cell A1: "TAG-001" (the tag identifier from dictionary key)
-• Cell B1: "Line 1" (from coordinate-value data)
-• Cell C1: "PID-001" (from coordinate-value data)
-• Cell D1: "100.5" (from coordinate-value data)
-
-AUTOMATIC SETTING:
-• The Top Tag is automatically set to the first coordinate you add for the primary data source
-• You can manually change it if needed
-
-IMPORTANT NOTES:
-• The Top Tag is the ANCHOR POINT for all tag operations
-• All other data positioning is calculated relative to this coordinate
-• When updating existing sheets, the system looks for tags at this coordinate
-• When creating new sheets, tags are placed at this coordinate"""
-                
-                help_window = tk.Toplevel(tab)
-                help_window.title("Top Tag Help")
-                help_window.geometry("500x400")
-                help_window.transient(tab)
-                help_window.grab_set()
-                
-                # Create scrolled text widget
-                import tkinter.scrolledtext as scrolledtext
-                text_widget = scrolledtext.ScrolledText(help_window, wrap=tk.WORD, padx=10, pady=10)
-                text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-                text_widget.insert(tk.END, help_text)
-                text_widget.configure(state='disabled')
-                
-                # Close button
-                ttk.Button(help_window, text="Close", command=help_window.destroy).pack(pady=10)
-            
-            help_btn = ttk.Button(top_tag_frame, text="?", width=3, command=show_top_tag_help)
+            help_btn = ttk.Button(top_tag_frame, text="?", width=3, 
+                                 command=lambda: self.show_help("top_tag.txt"))
             help_btn.pack(side="left", padx=(5, 0))
             
             # Partial match checkbox (only show for the specific data source)
@@ -1725,6 +1740,72 @@ IMPORTANT NOTES:
         region_label = ttk.Label(coord_frame, textvariable=region_var, 
                                 font=("Arial", 9), foreground="blue", width=20)
         region_label.pack(side="left", padx=(10, 0))
+        
+        # Refresh button for cell context (command will be configured after update_cell_context_display is defined)
+        refresh_context_button = ttk.Button(coord_frame, text="🔄", width=3)
+        refresh_context_button.pack(side="left", padx=(5, 0))
+
+        # Define the update function for cell context (after variables are created)
+        def update_cell_context_display():
+            """Manually update region and cell values (Above/Left) display"""
+            try:
+                # Get current selection from Excel
+                full_selection = xw.apps.active.selection.address
+                current_selection = full_selection.split(':')[0].replace('$', '')
+                
+                # Update region display
+                try:
+                    clean_selection = full_selection.replace('$', '')
+                    
+                    if ',' in clean_selection:
+                        # Non-contiguous selection (multiple ranges separated by commas)
+                        ranges = clean_selection.split(',')
+                        range_descriptions = []
+                        for i, range_addr in enumerate(ranges):
+                            if ':' in range_addr:
+                                start_cell, end_cell = range_addr.split(':')
+                                range_descriptions.append(f"Range{i+1}: {start_cell}:{end_cell}")
+                            else:
+                                range_descriptions.append(f"Cell{i+1}: {range_addr}")
+                        
+                        # Create detailed display
+                        if len(ranges) <= 3:
+                            # Show all ranges if 3 or fewer
+                            region_var.set(f"Region: {', '.join(range_descriptions)}")
+                        else:
+                            # Show count if more than 3 ranges
+                            region_var.set(f"Region: {len(ranges)} Non-contiguous Ranges ({ranges[0]}, {ranges[1]}, ...)")
+                            
+                    elif ':' in clean_selection:
+                        # Single contiguous range
+                        start_cell, end_cell = clean_selection.split(':')
+                        region_var.set(f"Region: Range {start_cell}:{end_cell}")
+                    else:
+                        # Single cell selected
+                        region_var.set(f"Region: Single Cell {clean_selection}")
+                except Exception as e:
+                    region_var.set("Region: Single Cell")
+                
+                # Update cell values display
+                try:
+                    sheet = xw.apps.active.books.active.sheets.active
+                    above_value, left_value = self.get_cell_values_above_and_left(sheet, current_selection)
+                    
+                    # Simple truncation to prevent layout issues
+                    above_text = str(above_value)[:15] + "..." if above_value and len(str(above_value)) > 15 else (str(above_value) if above_value else "—")
+                    left_text = str(left_value)[:15] + "..." if left_value and len(str(left_value)) > 15 else (str(left_value) if left_value else "—")
+                    
+                    cell_values_var.set(f"Above: {above_text} | Left: {left_text}")
+                except Exception as e:
+                    cell_values_var.set("Above: — | Left: —")
+                    
+            except Exception as e:
+                print(f"Error updating cell context display: {e}")
+                cell_values_var.set("Above: — | Left: —")
+                region_var.set("Region: Single Cell")
+        
+        # Configure the refresh button now that the function is defined
+        refresh_context_button.config(command=update_cell_context_display)
 
         # Main content frame (moved to left frame)
         content_frame = ttk.Frame(left_frame)
@@ -1826,14 +1907,37 @@ IMPORTANT NOTES:
         
         # Semantic mapping controls (moved to right frame)
         # Status indicator
-        self.semantic_status_label = ttk.Label(right_frame, text="Semantic model: Not loaded", foreground="red")
+        status_text = "Semantic model: Not loaded"
+        status_color = "red"
+        if self.model_loaded and self.semantic_model is not None:
+            status_text = "Semantic model: Ready"
+            status_color = "green"
+        elif self.loading_model:
+            status_text = "Semantic model: Loading..."
+            status_color = "orange"
+        
+        self.semantic_status_label = ttk.Label(right_frame, text=status_text, foreground=status_color)
         self.semantic_status_label.pack(anchor="w", pady=(0, 5))
+        print(f"DEBUG: Created semantic_status_label with text: {status_text}")
         
         # Load model button
         def load_semantic_model():
+            print("DEBUG: Load Semantic Model button clicked!")
+            print(f"DEBUG: model_loaded = {self.model_loaded}")
+            print(f"DEBUG: loading_model = {self.loading_model}")
+            
             if not self.model_loaded and not self.loading_model:
+                print("DEBUG: Conditions met, starting to load model...")
                 self.load_semantic_model_async()
                 self.semantic_status_label.config(text="Semantic model: Loading...", foreground="orange")
+            else:
+                print(f"DEBUG: Conditions NOT met! model_loaded={self.model_loaded}, loading_model={self.loading_model}")
+                if self.model_loaded:
+                    print("DEBUG: Model already loaded!")
+                    messagebox.showinfo("Info", "Semantic model is already loaded")
+                elif self.loading_model:
+                    print("DEBUG: Model is currently loading!")
+                    messagebox.showinfo("Info", "Semantic model is currently loading, please wait...")
         
         ttk.Button(right_frame, text="Load Semantic Model", 
                    command=load_semantic_model).pack(anchor="w", pady=(0, 10))
@@ -1999,28 +2103,50 @@ IMPORTANT NOTES:
         add_frame.pack(fill="x", padx=5, pady=2)
 
         filters_entries = []
-        # Get combo values using centralized system from all data sources
+        # Get combo values from the corresponding data source only
+        # Use a list that we can update when refreshing
         combo_values = []
-        for data_source in self.get_all_data_sources():
+        
+        def refresh_combo_values():
+            """Re-gather combo values from the data source and update all comboboxes"""
+            combo_values.clear()
             data = self.data_sources[data_source]['data']
             if data:
                 # Get keys from the first entry
                 first_entry = list(data.values())[0]
                 if isinstance(first_entry, dict):
                     combo_values.extend(list(first_entry.keys()))
+            
+            # Update all existing name_entry comboboxes with new values
+            for name_entry, filter_entry in filters_entries:
+                current_name = name_entry.get()
+                name_entry['values'] = combo_values
+                # If current selection is no longer valid, clear it
+                if current_name and current_name not in combo_values:
+                    name_entry.set('')
+                    filter_entry['values'] = []
+                    filter_entry.set('')
+                # If current selection is still valid, refresh filter values
+                elif current_name:
+                    new_filter_values = get_filter_values_for_header(current_name)
+                    filter_entry['values'] = new_filter_values
+                    # Clear if current filter value is no longer valid
+                    if filter_entry.get() not in new_filter_values:
+                        filter_entry.set('')
+            
+            print(f"Refreshed combo values for {data_source}: {combo_values}")
         
-        # Remove duplicates while preserving order
-        combo_values = list(dict.fromkeys(combo_values))
+        # Initial load of combo values
+        refresh_combo_values()
 
         def get_filter_values_for_header(header):
-            """Get unique values for a specific header from all data sources"""
+            """Get unique values for a specific header from the corresponding data source"""
             unique_values = set()
-            for data_source in self.get_all_data_sources():
-                data = self.data_sources[data_source]['data']
-                if data:
-                    for entry_key, entry_data in data.items():
-                        if isinstance(entry_data, dict) and header in entry_data and entry_data[header] is not None:
-                            unique_values.add(str(entry_data[header]))
+            data = self.data_sources[data_source]['data']
+            if data:
+                for entry_key, entry_data in data.items():
+                    if isinstance(entry_data, dict) and header in entry_data and entry_data[header] is not None:
+                        unique_values.add(str(entry_data[header]))
             return sorted(list(unique_values))
 
         def add_filter_row(name='', filter_value=''):
@@ -2070,6 +2196,9 @@ IMPORTANT NOTES:
 
         add_button = ttk.Button(button_frame, text="Add Filter", command=lambda: add_filter_row())
         add_button.pack(side="left", padx=5)
+
+        refresh_button = ttk.Button(button_frame, text="Refresh", command=refresh_combo_values)
+        refresh_button.pack(side="left", padx=5)
 
         save_button = ttk.Button(button_frame, text="Save", command=save_filters)
         save_button.pack(side="right", padx=5)
@@ -2260,11 +2389,8 @@ IMPORTANT NOTES:
         # Create the datasheet configuration content in the scrollable frame
         self.create_datasheet_config_content(scrollable_frame, config_window)
         
-        # Center the window
-        config_window.update_idletasks()
-        x = (config_window.winfo_screenwidth() // 2) - (config_window.winfo_width() // 2)
-        y = (config_window.winfo_screenheight() // 2) - (config_window.winfo_height() // 2)
-        config_window.geometry(f"+{x}+{y}")
+        # Center the window over the main window
+        center_window_over_parent(config_window)
 
     def create_datasheet_config_content(self, parent, window):
         """Create the datasheet configuration content for the popup window"""
@@ -2614,6 +2740,58 @@ IMPORTANT NOTES:
         # Update instance attributes from entry widgets before processing
         self.update_instance_attributes_from_entries()
         
+        # VALIDATION: Check for vital entries before proceeding
+        missing_fields = []
+        
+        # Check destination datasheet
+        if not self.destination_datasheet:
+            missing_fields.append("Datasheets (Destination)")
+        
+        # Get entry values to check required fields
+        self.ensure_global_entries_exist()
+        entry_values = self.get_entry_values()
+        
+        # Get primary data source info to determine what's required
+        primary_data_source = self.get_primary_data_source()
+        try:
+            primary_source_sheet_name, primary_top_tag, primary_partial_match = self.get_data_source_ui_values(primary_data_source)
+        except Exception as e:
+            print(f"Error getting data source UI values: {e}")
+            primary_source_sheet_name = ""
+            primary_top_tag = ""
+            primary_partial_match = False
+        
+        # Check required global entries (always required)
+        always_required = {
+            'rows_per_sheet': 'Rows per Sheet',
+            'sig_figs': 'Significant Figures',
+            'rounding_tolerance': 'Rounding Tolerance'
+        }
+        
+        for field_key, field_name in always_required.items():
+            value = entry_values.get(field_key, '').strip()
+            if not value:
+                missing_fields.append(field_name)
+        
+        # Datasheet Coordinate is only required if creating new sheets (source sheet is provided)
+        if primary_source_sheet_name and primary_source_sheet_name.strip():
+            datasheet_coord = entry_values.get('datasheet_coord', '').strip()
+            if not datasheet_coord:
+                missing_fields.append("Datasheet Coordinate (required when creating new sheets)")
+        
+        # Check top tag for primary data source
+        if not primary_top_tag or not primary_top_tag.strip():
+            missing_fields.append(f"Top Tag for {primary_data_source}")
+        
+        # If any required fields are missing, show error and cancel
+        if missing_fields:
+            self.update_status("Missing required fields", "red")
+            error_message = "Please fill in the following required fields before proceeding:\n\n"
+            error_message += "\n".join(f"• {field}" for field in missing_fields)
+            error_message += "\n\nThe Add/Update operation has been cancelled."
+            messagebox.showerror("Missing Required Fields", error_message)
+            return  # Cancel the operation
+        
         self.assign_value_coordinate_to_tag()
         print("Adding/Updating Datasheets")
         self.update_status("Adding/Updating Datasheets...", "blue")
@@ -2669,10 +2847,41 @@ IMPORTANT NOTES:
             print(f'    top_tag: {primary_top_tag}')
             print(f'    source_sheet_name: {primary_source_sheet_name}')
 
-            # Check for potential naming conflict
-            if primary_source_sheet_name and primary_source_sheet_name.startswith(self.ds_str):
-                print(f"WARNING: Source sheet name '{primary_source_sheet_name}' starts with datasheet prefix '{self.ds_str}'")
-                print("This may cause issues with sheet identification. Consider using a different prefix.")
+            # Check for potential naming conflicts
+            warning_messages = []
+            
+            # Check if source sheet name starts with prefix
+            if primary_source_sheet_name and self.ds_str and primary_source_sheet_name.startswith(self.ds_str):
+                warning_messages.append(
+                    f"⚠️ Source sheet '{primary_source_sheet_name}' starts with prefix '{self.ds_str}'\n"
+                    f"   This may cause the source sheet to be scanned as a datasheet."
+                )
+            
+            # Check if rows_per_sheet = 1 and any tag matches source sheet name
+            if self.rows_per_sheet == 1 and primary_source_sheet_name and primary_source_sheet_name in self.tag_cell_values:
+                warning_messages.append(
+                    f"🚨 CRITICAL: Tag name '{primary_source_sheet_name}' matches source sheet name!\n"
+                    f"   With rows_per_sheet=1, this will DELETE your source template!\n"
+                    f"   Either:\n"
+                    f"   • Rename your source sheet to something unique (e.g., '_Template', 'Source_Template')\n"
+                    f"   • Remove the tag '{primary_source_sheet_name}' from your data\n"
+                    f"   • Change rows_per_sheet to a value > 1"
+                )
+            
+            # Show warnings if any exist
+            if warning_messages:
+                warning_text = "⚠️ WARNING - Potential Issues Detected:\n\n" + "\n\n".join(warning_messages)
+                warning_text += "\n\nDo you want to proceed anyway?"
+                
+                print("WARNING: Potential configuration issues detected")
+                for msg in warning_messages:
+                    print(msg)
+                
+                # Show warning dialog with Yes/No
+                proceed = messagebox.askyesno("Configuration Warning", warning_text, icon='warning')
+                if not proceed:
+                    self.update_status("Operation cancelled by user", "orange")
+                    return  # Cancel the operation
 
             # Convert dropdown selection to the correct parameter value
             color_option = self.color_coding_var.get()
@@ -2795,6 +3004,10 @@ IMPORTANT NOTES:
                     partial_match = config.get('partial_match', False)
                     self.set_data_source_ui_values(data_source, source_sheet_name, top_tag, partial_match)
             
+            # Update the current settings file and window title
+            self.current_settings_file = file_path
+            self.save_last_settings_file_path(file_path)
+            self.update_window_title()
             
             messagebox.showinfo("Success", f"Settings loaded successfully from:\n{file_path}")
             
@@ -2809,18 +3022,13 @@ IMPORTANT NOTES:
             traceback.print_exc()
 
     def save_settings(self, use_pickle=True):
-        """Save current settings to a JSON file"""
+        """Save current settings to the current file or prompt if none exists"""
         try:
-            # Ask user where to save the settings file
-            file_path = filedialog.asksaveasfilename(
-                title="Save Settings",
-                defaultextension=".json",
-                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-                initialfile=f"datasheet_helper_settings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            )
+            # If no current settings file, use Save As
+            if not self.current_settings_file:
+                return self.save_settings_as()
             
-            if not file_path:
-                return
+            file_path = self.current_settings_file
             
             # Collect all settings data
             settings_data = {
@@ -2855,6 +3063,10 @@ IMPORTANT NOTES:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(settings_data, f, indent=2, ensure_ascii=False)
             
+            # Update the last settings file path and window title
+            self.save_last_settings_file_path(file_path)
+            self.update_window_title()
+            
             messagebox.showinfo("Success", f"Settings saved successfully to:\n{file_path}")
             
         except Exception as e:
@@ -2862,6 +3074,182 @@ IMPORTANT NOTES:
             print(f"Detailed error: {e}")
             import traceback
             traceback.print_exc()
+
+    def save_settings_as(self, use_pickle=True):
+        """Save current settings to a new JSON file (Save As)"""
+        try:
+            # Ask user where to save the settings file
+            initial_file = f"datasheet_helper_settings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            if self.current_settings_file:
+                # Default to the current file's directory and name
+                initial_file = os.path.basename(self.current_settings_file)
+                initialdir = os.path.dirname(self.current_settings_file)
+            else:
+                initialdir = "."
+            
+            file_path = filedialog.asksaveasfilename(
+                title="Save Settings As",
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                initialfile=initial_file,
+                initialdir=initialdir
+            )
+            
+            if not file_path:
+                return
+            
+            # Update current settings file
+            self.current_settings_file = file_path
+            
+            # Collect all settings data
+            settings_data = {
+                'version': '1.0',
+                'saved_date': datetime.now().isoformat(),
+                'entry_values': self.get_entry_values(),
+                'dynamic_attributes': self.get_dynamic_attributes(),
+                'data_sources': {}
+            }
+            
+            # Save data sources configuration
+            for data_source, config in self.data_sources.items():
+                # Get current values from UI entries for this data source
+                ui_source_sheet, ui_top_tag, ui_partial_match = self.get_data_source_ui_values(data_source)
+                
+                # Update config with current UI values
+                config['top_tag'] = ui_top_tag
+                config['source_sheet_name'] = ui_source_sheet
+                config['partial_match'] = ui_partial_match
+                
+                settings_data['data_sources'][data_source] = {
+                    'headers': config.get('headers', []),
+                    'coordinate_values': config.get('coordinate_values', {}),
+                    'selected_sheets': config.get('selected_sheets', None),
+                    'top_tag': config.get('top_tag', ''),
+                    'source_sheet_name': config.get('source_sheet_name', ''),
+                    'data': config.get('data', {}),
+                    'path': config.get('path', '')
+                }
+            
+            # Write to file
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(settings_data, f, indent=2, ensure_ascii=False)
+            
+            # Update the last settings file path and window title
+            self.save_last_settings_file_path(file_path)
+            self.update_window_title()
+            
+            messagebox.showinfo("Success", f"Settings saved successfully to:\n{file_path}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
+            print(f"Detailed error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def update_window_title(self):
+        """Update the window title to show the current settings file path"""
+        base_title = "Datasheet Helper App"
+        if self.current_settings_file:
+            # Show just the filename and directory for brevity
+            filename = os.path.basename(self.current_settings_file)
+            self.root.title(f"{base_title} - [{filename}]")
+        else:
+            self.root.title(base_title)
+    
+    def save_last_settings_file_path(self, file_path):
+        """Save the path to the last settings file for auto-loading on next startup"""
+        try:
+            with open(self.last_settings_file_path, 'w', encoding='utf-8') as f:
+                f.write(file_path)
+        except Exception as e:
+            print(f"Error saving last settings file path: {e}")
+    
+    def load_last_settings_file_path(self):
+        """Load the path to the last settings file"""
+        try:
+            if os.path.exists(self.last_settings_file_path):
+                with open(self.last_settings_file_path, 'r', encoding='utf-8') as f:
+                    return f.read().strip()
+        except Exception as e:
+            print(f"Error loading last settings file path: {e}")
+        return None
+    
+    def auto_load_last_settings(self):
+        """Auto-load the last settings file if it exists"""
+        last_file = self.load_last_settings_file_path()
+        if last_file and os.path.exists(last_file):
+            try:
+                print(f"DEBUG: Auto-loading last settings file: {last_file}")
+                with open(last_file, 'r', encoding='utf-8') as f:
+                    settings_data = json.load(f)
+                
+                # Validate the settings file format
+                if 'version' not in settings_data:
+                    print("DEBUG: Invalid settings file format, skipping auto-load")
+                    return
+                
+                # Store entry values to apply after UI rebuild
+                saved_entry_values = settings_data.get('entry_values', {})
+                
+                # Load default settings (legacy support - no longer used)
+                if 'default_settings' in settings_data:
+                    for key, value in settings_data['default_settings'].items():
+                        # Set as instance attribute if it exists
+                        if hasattr(self, key):
+                            setattr(self, key, value)
+                
+                # Load dynamic attributes
+                if 'dynamic_attributes' in settings_data:
+                    self.set_dynamic_attributes(settings_data['dynamic_attributes'])
+                
+                # Load data sources configuration
+                if 'data_sources' in settings_data:
+                    for data_source, config in settings_data['data_sources'].items():
+                        # Create the data source if it doesn't exist
+                        if data_source not in self.data_sources:
+                            self.add_data_source(data_source, config)
+                        else:
+                            # Update the existing data source configuration
+                            for key, value in config.items():
+                                self.data_sources[data_source][key] = value
+                        
+                
+                # Refresh the UI to reflect loaded settings
+                # Clear the entries list since widgets will be recreated
+                self.entries = []
+                # First refresh the data sources notebook to show any new data sources
+                self.refresh_data_sources_notebook()
+                # Then refresh data source frames in case new data sources were loaded
+                self.refresh_data_source_frames()
+                # Finally refresh all tab content to show the loaded data
+                self.refresh_tab_content(force_rebuild=True)
+                
+                # Repopulate the entries list after UI refresh
+                self.repopulate_entries_list()
+                
+                # NOW set entry values after UI has been rebuilt and entries repopulated
+                if saved_entry_values:
+                    self.set_entry_values(saved_entry_values)
+                
+                # Set data_source specific UI entries after UI is refreshed
+                if 'data_sources' in settings_data:
+                    for data_source, config in settings_data['data_sources'].items():
+                        source_sheet_name = config.get('source_sheet_name', '')
+                        top_tag = config.get('top_tag', '')
+                        partial_match = config.get('partial_match', False)
+                        self.set_data_source_ui_values(data_source, source_sheet_name, top_tag, partial_match)
+                
+                # Update the current settings file and window title
+                self.current_settings_file = last_file
+                self.update_window_title()
+                
+                print(f"DEBUG: Auto-loaded settings from: {last_file}")
+                
+            except Exception as e:
+                print(f"Error auto-loading settings: {e}")
+                import traceback
+                traceback.print_exc()
+                # Don't show error message to user on auto-load failure, just continue with default state
 
     def get_entry_values(self):
         """Get current values from all entry widgets"""
@@ -2983,7 +3371,9 @@ IMPORTANT NOTES:
         important_attrs = [
             'current_transform_data_source', 'current_transform_key',
             'tag_filters', 'tag_cell_values', 'coordinate_conversions', 
-            'coordinate_combinations', 'semantic_model', 'model_loaded', 'loading_model'
+            'coordinate_combinations'
+            # NOTE: semantic_model, model_loaded, loading_model are excluded
+            # because the ML model cannot be serialized and should be reloaded each session
         ]
         
         for attr in important_attrs:
@@ -3005,6 +3395,14 @@ IMPORTANT NOTES:
                 setattr(self, attr, value)
             except Exception as e:
                 print(f"Error setting dynamic attribute {attr}: {e}")
+        
+        # Safety check: Ensure semantic model state is consistent
+        # (model_loaded and loading_model should not be restored from saved state)
+        if hasattr(self, 'model_loaded') and self.model_loaded:
+            if not hasattr(self, 'semantic_model') or self.semantic_model is None:
+                print("DEBUG: Detected inconsistent semantic model state after restore. Resetting flags.")
+                self.model_loaded = False
+                self.loading_model = False
     
     def _is_serializable(self, obj):
         """Check if an object is JSON serializable"""
@@ -3095,29 +3493,45 @@ IMPORTANT NOTES:
         # Create a new window
         view_window = tk.Toplevel(self.root)
         view_window.title(name)
-        
-        # Center the dialog on the main window
         view_window.transient(self.root)
         view_window.grab_set()
         
-        # Calculate position to center on main window
-        view_window.update_idletasks()
-        main_x = self.root.winfo_x()
-        main_y = self.root.winfo_y()
-        main_width = self.root.winfo_width()
-        main_height = self.root.winfo_height()
-        
         dialog_width = 800  # Set a reasonable default width
         dialog_height = 600  # Set a reasonable default height
+        view_window.geometry(f"{dialog_width}x{dialog_height}")
         
-        x = main_x + (main_width - dialog_width) // 2
-        y = main_y + (main_height - dialog_height) // 2
+        # Center the dialog over the main window
+        center_window_over_parent(view_window)
+
+        # Create a search frame
+        search_frame = tk.Frame(view_window)
+        search_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        view_window.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+        # Search label and entry
+        search_label = tk.Label(search_frame, text="Search:")
+        search_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        search_var = tk.StringVar()
+        search_entry = tk.Entry(search_frame, textvariable=search_var, width=30)
+        search_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Match counter label
+        match_label = tk.Label(search_frame, text="")
+        match_label.pack(side=tk.LEFT, padx=10)
+        
+        # Navigation buttons
+        prev_button = tk.Button(search_frame, text="◀ Previous", width=10)
+        prev_button.pack(side=tk.LEFT, padx=2)
+        
+        next_button = tk.Button(search_frame, text="Next ▶", width=10)
+        next_button.pack(side=tk.LEFT, padx=2)
 
         # Create a button frame for actions
         button_frame = tk.Frame(view_window)
         button_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Placeholder for search reapply function (will be set later)
+        reapply_search = [None]
 
         def refresh_display():
             """Refresh the display with current data"""
@@ -3132,6 +3546,10 @@ IMPORTANT NOTES:
                 scrolled_text.insert(tk.END, f"No {name} data available.")
             
             scrolled_text.configure(state='disabled')
+            
+            # Reapply search highlighting if function is available
+            if reapply_search[0] is not None:
+                reapply_search[0]()
 
         def split_keys():
             """Split composite keys based on delimiter"""
@@ -3252,6 +3670,226 @@ IMPORTANT NOTES:
                 tk.messagebox.showerror("Error", 
                                       f"An error occurred while pasting from clipboard:\n{str(e)}")
 
+        def sort_data():
+            """Sort the dictionary data by keys or values"""
+            current_data = self.data_sources[data_source]['data']
+            if not current_data:
+                tk.messagebox.showwarning("No Data", f"No {name} data available to sort.")
+                return
+            
+            # Create a dialog to choose sort options
+            sort_dialog = tk.Toplevel(view_window)
+            sort_dialog.title("Sort Data")
+            sort_dialog.transient(view_window)
+            sort_dialog.grab_set()
+            
+            # Center the dialog
+            dialog_width = 400
+            dialog_height = 250
+            sort_dialog.geometry(f"{dialog_width}x{dialog_height}")
+            
+            # Sort by option
+            sort_frame = tk.LabelFrame(sort_dialog, text="Sort Options", padx=10, pady=10)
+            sort_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            sort_by_var = tk.StringVar(value="key")
+            tk.Radiobutton(sort_frame, text="Sort by Keys (A-Z)", variable=sort_by_var, value="key").pack(anchor=tk.W)
+            tk.Radiobutton(sort_frame, text="Sort by Keys (Z-A)", variable=sort_by_var, value="key_reverse").pack(anchor=tk.W)
+            tk.Radiobutton(sort_frame, text="Sort by Values (A-Z)", variable=sort_by_var, value="value").pack(anchor=tk.W)
+            tk.Radiobutton(sort_frame, text="Sort by Values (Z-A)", variable=sort_by_var, value="value_reverse").pack(anchor=tk.W)
+            
+            # Add option to sort by field in value
+            field_sort_frame = tk.Frame(sort_frame)
+            field_sort_frame.pack(anchor=tk.W, pady=5)
+            tk.Radiobutton(field_sort_frame, text="Sort by Field in Value:", variable=sort_by_var, value="field").pack(side=tk.LEFT)
+            field_entry = tk.Entry(field_sort_frame, width=20)
+            field_entry.pack(side=tk.LEFT, padx=5)
+            
+            # Add option for reverse field sort
+            field_sort_reverse_frame = tk.Frame(sort_frame)
+            field_sort_reverse_frame.pack(anchor=tk.W, pady=2)
+            tk.Radiobutton(field_sort_reverse_frame, text="Sort by Field in Value (Z-A):", variable=sort_by_var, value="field_reverse").pack(side=tk.LEFT)
+            
+            # Helper text
+            tk.Label(sort_frame, text="(e.g., 'name' or 'data.value' for nested)", 
+                    font=('Arial', 8), fg='gray').pack(anchor=tk.W, padx=20)
+            
+            def get_nested_value(obj, field_path):
+                """Get value from nested dictionary using dot notation"""
+                keys = field_path.split('.')
+                value = obj
+                for key in keys:
+                    if isinstance(value, dict):
+                        value = value.get(key)
+                        if value is None:
+                            return None
+                    else:
+                        return None
+                return value
+            
+            def apply_sort():
+                sort_option = sort_by_var.get()
+                
+                try:
+                    if sort_option == "key":
+                        sorted_data = dict(sorted(current_data.items(), key=lambda item: str(item[0]).lower()))
+                    elif sort_option == "key_reverse":
+                        sorted_data = dict(sorted(current_data.items(), key=lambda item: str(item[0]).lower(), reverse=True))
+                    elif sort_option == "value":
+                        sorted_data = dict(sorted(current_data.items(), key=lambda item: str(item[1]).lower()))
+                    elif sort_option == "value_reverse":
+                        sorted_data = dict(sorted(current_data.items(), key=lambda item: str(item[1]).lower(), reverse=True))
+                    elif sort_option == "field" or sort_option == "field_reverse":
+                        field_name = field_entry.get().strip()
+                        if not field_name:
+                            tk.messagebox.showerror("Field Required", 
+                                                  "Please enter a field name to sort by.")
+                            return
+                        
+                        # Check if any values are dictionaries with the specified field
+                        has_field = False
+                        missing_field_count = 0
+                        
+                        for value in current_data.values():
+                            field_value = get_nested_value(value, field_name)
+                            if field_value is not None:
+                                has_field = True
+                            else:
+                                missing_field_count += 1
+                        
+                        if not has_field:
+                            tk.messagebox.showerror("Field Not Found", 
+                                                  f"Field '{field_name}' not found in any values.")
+                            return
+                        
+                        # Sort by the field, putting items without the field at the end
+                        def sort_key(item):
+                            field_value = get_nested_value(item[1], field_name)
+                            if field_value is None:
+                                return (1, "")  # Put None values at the end
+                            return (0, str(field_value).lower())
+                        
+                        sorted_data = dict(sorted(current_data.items(), 
+                                                key=sort_key,
+                                                reverse=(sort_option == "field_reverse")))
+                        
+                        if missing_field_count > 0:
+                            tk.messagebox.showinfo("Note", 
+                                                 f"{missing_field_count} entries did not have the field '{field_name}' "
+                                                 f"and were placed at the end.")
+                    
+                    # Update the data with sorted version
+                    self.data_sources[data_source]['data'] = sorted_data
+                    
+                    # Update tab text to show checkmark
+                    self.add_checkmark_to_tab(data_source)
+                    
+                    # Refresh the display
+                    refresh_display()
+                    
+                    # Close the sort dialog
+                    sort_dialog.destroy()
+                    
+                    tk.messagebox.showinfo("Sort Complete", 
+                                         f"Successfully sorted {len(sorted_data)} entries.")
+                    
+                except Exception as e:
+                    tk.messagebox.showerror("Sort Error", 
+                                          f"An error occurred while sorting:\n{str(e)}")
+            
+            # Buttons
+            button_frame_sort = tk.Frame(sort_dialog)
+            button_frame_sort.pack(fill=tk.X, padx=10, pady=5)
+            
+            tk.Button(button_frame_sort, text="Apply", command=apply_sort).pack(side=tk.LEFT, padx=5)
+            tk.Button(button_frame_sort, text="Cancel", command=sort_dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+        def save_to_json():
+            """Save the current data to a JSON file"""
+            current_data = self.data_sources[data_source]['data']
+            if not current_data:
+                tk.messagebox.showwarning("No Data", f"No {name} data available to save.")
+                return
+            
+            # Ask user for file location
+            file_path = filedialog.asksaveasfilename(
+                title=f"Save {name} Data",
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                initialfile=f"{name.lower().replace(' ', '_')}_data.json"
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            try:
+                # Save data to JSON file with nice formatting
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(current_data, f, indent=2, ensure_ascii=False)
+                
+                tk.messagebox.showinfo("Save Complete", 
+                                     f"Successfully saved {len(current_data)} entries to:\n{file_path}")
+                
+            except Exception as e:
+                tk.messagebox.showerror("Save Error", 
+                                      f"An error occurred while saving to JSON:\n{str(e)}")
+
+        def load_from_json():
+            """Load data from a JSON file"""
+            # Ask user for file location
+            file_path = filedialog.askopenfilename(
+                title=f"Load {name} Data",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            try:
+                # Load data from JSON file
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    loaded_data = json.load(f)
+                
+                # Validate that it's a dictionary
+                if not isinstance(loaded_data, dict):
+                    tk.messagebox.showerror("Invalid Format", 
+                                          "JSON file must contain a JSON object (dictionary).")
+                    return
+                
+                # Confirm overwrite
+                current_data = self.data_sources[data_source]['data']
+                if current_data:
+                    result = tk.messagebox.askyesno("Confirm Overwrite", 
+                                                  f"This will overwrite all current {name} data.\n\n"
+                                                  f"Current entries: {len(current_data)}\n"
+                                                  f"New entries: {len(loaded_data)}\n\n"
+                                                  "Do you want to continue?")
+                    if not result:
+                        return
+                
+                # Update the data
+                self.data_sources[data_source]['data'] = loaded_data
+                
+                # Update coordinates combo box with new data
+                self.update_coordinates_combo_box(data_source)
+                
+                # Update tab text to show checkmark
+                self.add_checkmark_to_tab(data_source)
+                
+                # Show success message
+                tk.messagebox.showinfo("Load Complete", 
+                                     f"Successfully loaded {len(loaded_data)} entries from:\n{file_path}")
+                
+                # Refresh the display
+                refresh_display()
+                
+            except json.JSONDecodeError as e:
+                tk.messagebox.showerror("Invalid JSON", 
+                                      f"File is not valid JSON:\n{str(e)}")
+            except Exception as e:
+                tk.messagebox.showerror("Load Error", 
+                                      f"An error occurred while loading from JSON:\n{str(e)}")
+
         # Add Split Keys button
         split_button = tk.Button(button_frame, text="Split Keys", command=split_keys)
         split_button.pack(side=tk.LEFT, padx=5)
@@ -3263,6 +3901,18 @@ IMPORTANT NOTES:
         # Add Modify Keys button
         modify_keys_button = tk.Button(button_frame, text="Modify Keys", command=lambda: self.update_data_source_keys(data_source))
         modify_keys_button.pack(side=tk.LEFT, padx=5)
+        
+        # Add Sort Data button
+        sort_button = tk.Button(button_frame, text="Sort Data", command=sort_data)
+        sort_button.pack(side=tk.LEFT, padx=5)
+        
+        # Add Save to JSON button
+        save_json_button = tk.Button(button_frame, text="Save to JSON", command=save_to_json)
+        save_json_button.pack(side=tk.LEFT, padx=5)
+        
+        # Add Load from JSON button
+        load_json_button = tk.Button(button_frame, text="Load from JSON", command=load_from_json)
+        load_json_button.pack(side=tk.LEFT, padx=5)
 
         # Create a scrolled text widget to display the data
         scrolled_text = scrolledtext.ScrolledText(view_window, width=40, height=20)
@@ -3276,6 +3926,141 @@ IMPORTANT NOTES:
             scrolled_text.insert(tk.END, f"No {name} data available.")
 
         scrolled_text.configure(state='disabled')  # Make read-only
+        
+        # Configure tags for search highlighting
+        scrolled_text.tag_configure("highlight", background="yellow", foreground="black")
+        scrolled_text.tag_configure("current_highlight", background="orange", foreground="black")
+        
+        # Search state variables
+        search_matches = []
+        current_match_index = [0]  # Using list to make it mutable in nested functions
+        
+        def clear_highlights():
+            """Clear all search highlights"""
+            scrolled_text.tag_remove("highlight", "1.0", tk.END)
+            scrolled_text.tag_remove("current_highlight", "1.0", tk.END)
+        
+        def highlight_matches(search_text):
+            """Highlight all occurrences of search_text"""
+            nonlocal search_matches
+            search_matches = []
+            current_match_index[0] = 0
+            
+            # Clear previous highlights
+            clear_highlights()
+            
+            if not search_text:
+                match_label.config(text="")
+                return
+            
+            # Find all matches (case-insensitive)
+            search_text_lower = search_text.lower()
+            content = scrolled_text.get("1.0", tk.END).lower()
+            
+            # Find all match positions
+            start_pos = 0
+            while True:
+                pos = content.find(search_text_lower, start_pos)
+                if pos == -1:
+                    break
+                search_matches.append(pos)
+                start_pos = pos + 1
+            
+            # Highlight all matches
+            for match_pos in search_matches:
+                # Convert character position to tkinter index
+                idx = f"1.0 + {match_pos} chars"
+                end_idx = f"{idx} + {len(search_text)} chars"
+                scrolled_text.tag_add("highlight", idx, end_idx)
+            
+            # Update match counter
+            if search_matches:
+                match_label.config(text=f"Match 1 of {len(search_matches)}")
+                # Highlight the first match differently
+                idx = f"1.0 + {search_matches[0]} chars"
+                end_idx = f"{idx} + {len(search_text)} chars"
+                scrolled_text.tag_add("current_highlight", idx, end_idx)
+                # Scroll to first match
+                scrolled_text.see(idx)
+            else:
+                match_label.config(text="No matches found")
+        
+        def on_search_change(*args):
+            """Called when search text changes"""
+            search_text = search_var.get()
+            highlight_matches(search_text)
+        
+        def goto_next_match():
+            """Navigate to the next match"""
+            if not search_matches:
+                return
+            
+            search_text = search_var.get()
+            if not search_text:
+                return
+            
+            # Move to next match
+            current_match_index[0] = (current_match_index[0] + 1) % len(search_matches)
+            
+            # Clear current highlight
+            scrolled_text.tag_remove("current_highlight", "1.0", tk.END)
+            
+            # Highlight current match
+            match_pos = search_matches[current_match_index[0]]
+            idx = f"1.0 + {match_pos} chars"
+            end_idx = f"{idx} + {len(search_text)} chars"
+            scrolled_text.tag_add("current_highlight", idx, end_idx)
+            
+            # Scroll to match
+            scrolled_text.see(idx)
+            
+            # Update counter
+            match_label.config(text=f"Match {current_match_index[0] + 1} of {len(search_matches)}")
+        
+        def goto_prev_match():
+            """Navigate to the previous match"""
+            if not search_matches:
+                return
+            
+            search_text = search_var.get()
+            if not search_text:
+                return
+            
+            # Move to previous match
+            current_match_index[0] = (current_match_index[0] - 1) % len(search_matches)
+            
+            # Clear current highlight
+            scrolled_text.tag_remove("current_highlight", "1.0", tk.END)
+            
+            # Highlight current match
+            match_pos = search_matches[current_match_index[0]]
+            idx = f"1.0 + {match_pos} chars"
+            end_idx = f"{idx} + {len(search_text)} chars"
+            scrolled_text.tag_add("current_highlight", idx, end_idx)
+            
+            # Scroll to match
+            scrolled_text.see(idx)
+            
+            # Update counter
+            match_label.config(text=f"Match {current_match_index[0] + 1} of {len(search_matches)}")
+        
+        # Bind search variable to trigger highlighting
+        search_var.trace("w", on_search_change)
+        
+        # Bind navigation buttons
+        next_button.config(command=goto_next_match)
+        prev_button.config(command=goto_prev_match)
+        
+        # Bind Enter key to go to next match
+        search_entry.bind("<Return>", lambda e: goto_next_match())
+        search_entry.bind("<Shift-Return>", lambda e: goto_prev_match())
+        
+        # Set the reapply search function for refresh_display
+        def reapply_search_func():
+            search_text = search_var.get()
+            if search_text:
+                highlight_matches(search_text)
+        reapply_search[0] = reapply_search_func
 
 
 
@@ -3857,11 +4642,12 @@ The datasheets have been generated and are ready for use."""
 
             # Update listboxes in the main window (call the method on the tab)
             # Find the current data source tab and its coordinates tab
-            current_tab_index = self.data_sources_notebook.index('current')
-            current_data_source = list(self.data_sources.keys())[current_tab_index]
+            current_tab_id = self.data_sources_notebook.select()
+            current_tab_text = self.data_sources_notebook.tab(current_tab_id, "text")
+            current_data_source = current_tab_text.replace(" ✓", "").strip()
             
             # Find the coordinates tab within the current data source tab
-            current_tab = self.data_sources_notebook.winfo_children()[current_tab_index]
+            current_tab = self.data_sources_notebook.nametowidget(current_tab_id)
             for child in current_tab.winfo_children():
                 if isinstance(child, ttk.Notebook):
                     for i in range(child.index('end')):
@@ -3888,8 +4674,8 @@ The datasheets have been generated and are ready for use."""
             print(f"Removed conversion for {coord}")
             # Update listboxes
             # Find the current data source tab and its coordinates tab
-            current_tab_index = self.data_sources_notebook.index('current')
-            current_tab = self.data_sources_notebook.winfo_children()[current_tab_index]
+            current_tab_id = self.data_sources_notebook.select()
+            current_tab = self.data_sources_notebook.nametowidget(current_tab_id)
             for child in current_tab.winfo_children():
                 if isinstance(child, ttk.Notebook):
                     for i in range(child.index('end')):
@@ -4029,8 +4815,8 @@ The datasheets have been generated and are ready for use."""
 
             # Update listboxes
             # Find the current data source tab and its coordinates tab
-            current_tab_index = self.data_sources_notebook.index('current')
-            current_tab = self.data_sources_notebook.winfo_children()[current_tab_index]
+            current_tab_id = self.data_sources_notebook.select()
+            current_tab = self.data_sources_notebook.nametowidget(current_tab_id)
             for child in current_tab.winfo_children():
                 if isinstance(child, ttk.Notebook):
                     for i in range(child.index('end')):
@@ -4057,8 +4843,8 @@ The datasheets have been generated and are ready for use."""
             print(f"Removed combination for {coord}")
             # Update listboxes
             # Find the current data source tab and its coordinates tab
-            current_tab_index = self.data_sources_notebook.index('current')
-            current_tab = self.data_sources_notebook.winfo_children()[current_tab_index]
+            current_tab_id = self.data_sources_notebook.select()
+            current_tab = self.data_sources_notebook.nametowidget(current_tab_id)
             for child in current_tab.winfo_children():
                 if isinstance(child, ttk.Notebook):
                     for i in range(child.index('end')):
@@ -4080,23 +4866,15 @@ The datasheets have been generated and are ready for use."""
         # Create dialog window
         dialog = tk.Toplevel(self.root)
         dialog.title("Excel File Processing")
-        # Center the dialog
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.update_idletasks()
-        main_x = self.root.winfo_x()
-        main_y = self.root.winfo_y()
-        main_width = self.root.winfo_width()
-        main_height = self.root.winfo_height()
         
         dialog_width = 500
         dialog_height = 400
-
-        x = main_x + (main_width - dialog_width) // 2
-        y = main_y + (main_height - dialog_height) // 2   
-
+        dialog.geometry(f"{dialog_width}x{dialog_height}")
         
-        dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
+        # Center the dialog over the main window
+        center_window_over_parent(dialog)
 
         # Main frame
         main_frame = ttk.Frame(dialog, padding="20")
@@ -4299,34 +5077,54 @@ The datasheets have been generated and are ready for use."""
     # Semantic similarity methods
     def load_semantic_model_async(self):
         """Load the sentence transformer model in a background thread"""
+        print("DEBUG: load_semantic_model_async() called")
+        
         def load_model():
+            print("DEBUG: load_model() thread started")
             try:
                 self.loading_model = True
+                print("DEBUG: Set loading_model = True")
                 print("DEBUG: Importing sentence_transformers...")
                 from sentence_transformers import SentenceTransformer
+                print("DEBUG: Import successful, creating model...")
                 # Use a lightweight model for faster loading
                 self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')
+                print("DEBUG: Model created successfully")
                 self.model_loaded = True
                 self.loading_model = False
+                print("DEBUG: Set model_loaded = True, loading_model = False")
                 
                 # Update UI in main thread
+                print("DEBUG: Scheduling on_semantic_model_loaded callback")
                 self.root.after(0, self.on_semantic_model_loaded)
             except Exception as e:
+                print(f"DEBUG: Exception occurred in load_model: {type(e).__name__}: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 self.loading_model = False
                 self.root.after(0, lambda: self.on_semantic_model_error(str(e)))
         
+        print("DEBUG: Creating and starting thread...")
         thread = threading.Thread(target=load_model, daemon=True)
         thread.start()
+        print("DEBUG: Thread started")
     
     def on_semantic_model_loaded(self):
         """Called when semantic model is successfully loaded"""
+        print("DEBUG: on_semantic_model_loaded() called")
         print("Semantic model loaded successfully!")
         # Update status label if it exists
         if hasattr(self, 'semantic_status_label'):
+            print("DEBUG: Updating semantic_status_label to Ready")
             self.semantic_status_label.config(text="Semantic model: Ready", foreground="green")
+        else:
+            print("DEBUG: WARNING - semantic_status_label does not exist!")
+        
+        messagebox.showinfo("Success", "Semantic model loaded successfully!")
     
     def on_semantic_model_error(self, error_msg):
         """Called when semantic model loading fails"""
+        print(f"DEBUG: on_semantic_model_error() called")
         print(f"Error loading semantic model: {error_msg}")
         messagebox.showerror("Error", f"Failed to load semantic model: {error_msg}")
     
@@ -4441,7 +5239,7 @@ The datasheets have been generated and are ready for use."""
             
             if not data:
                 print("  - ERROR: No data found for data_source")
-                return None, 0.0
+                return None, 0.0, None
             
             # Get the options (keys from the first value dict)
             options = []
@@ -4454,7 +5252,7 @@ The datasheets have been generated and are ready for use."""
             
             if not options:
                 print("  - ERROR: No options found in data")
-                return None, 0.0
+                return None, 0.0, None
             
             # Prepare text for semantic comparison
             text_options = []
@@ -4468,12 +5266,17 @@ The datasheets have been generated and are ready for use."""
             
             if not text_options:
                 print("  - ERROR: No text options available for comparison")
-                return None, 0.0
+                return None, 0.0, None
             
             # Check if semantic model is available
+            print(f"  - DEBUG: model_loaded = {self.model_loaded}")
+            print(f"  - DEBUG: hasattr semantic_model = {hasattr(self, 'semantic_model')}")
+            print(f"  - DEBUG: semantic_model value = {self.semantic_model}")
+            
             if not hasattr(self, 'semantic_model') or self.semantic_model is None:
                 print("  - ERROR: Semantic model not available")
-                return None, 0.0
+                print("  - HINT: Click 'Load Semantic Model' button first!")
+                return None, 0.0, None
             
             print(f"  - Semantic model available: {self.semantic_model is not None}")
             
@@ -4523,7 +5326,7 @@ The datasheets have been generated and are ready for use."""
             print(f"  - ERROR in semantic mapping: {e}")
             import traceback
             print(f"  - Traceback: {traceback.format_exc()}")
-            return None, 0.0
+            return None, 0.0, None
 
     def automap_range(self, data_source, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
         """Iterate through a range of cells and perform semantic mapping"""

@@ -1,0 +1,34 @@
+Datasheet Coordinate
+====================
+
+Specifies the cell coordinate where the datasheet NUMBER or NAME will be written on newly created sheets.
+
+⚠️ REQUIRED ONLY WHEN CREATING NEW SHEETS (Source Sheet Name is provided)
+✓ OPTIONAL when only updating existing sheets (Source Sheet Name is blank)
+
+Usage:
+- Enter an Excel cell reference (e.g., "C8", "A1", "B2")
+- This is where the sheet identifier (like "DS-001", "DS-002", etc.) will be placed
+- Used for labeling and identifying each datasheet sheet
+- This is DIFFERENT from the "Top Tag" coordinate (which is where actual tag data goes)
+
+Key Distinction:
+- Datasheet Coordinate = Where the SHEET NAME/NUMBER appears on the sheet
+- Top Tag = Where the TAG IDENTIFIERS and data actually go
+
+Examples:
+- "C8" - Common location for datasheet numbering in headers
+- "A1" - Top-left corner for simple numbering
+- "B2" - Slightly offset if cell A1 contains a logo or title
+
+When New Sheets Are Created:
+- If creating "DS-001", "DS-002", etc., each number is written at this coordinate
+- If rows_per_sheet = 1, the tag name itself may be used as the sheet name
+- If rows_per_sheet > 1, sequential datasheet numbers are used
+
+Tips:
+- Choose a cell that's visible but doesn't interfere with your data layout
+- This is often placed in a header area, title block, or designated numbering cell
+- Make sure this coordinate doesn't overlap with your Top Tag or data coordinates
+- Common in engineering templates where each sheet needs a unique identifier
+

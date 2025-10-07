@@ -1,0 +1,52 @@
+Top Tag - Key Coordinate
+=========================
+
+This is the Excel cell coordinate (e.g., A1, I12) where the tag identifier is placed in each datasheet.
+
+WHAT IT DOES:
+• Places the dictionary key (tag identifier) at this coordinate
+• Serves as the anchor point for all tag-related operations
+• Used to identify existing tags when updating sheets
+• Used to place new tags when creating sheets
+• Calculates row offsets for positioning other data
+
+HOW IT WORKS WITH COORDINATE-VALUE DATA:
+The Top Tag and Coordinate-Value Data work together:
+
+1. TOP TAG: Determines WHERE the tag goes
+   - Places the dictionary key (e.g., "TAG-001") at the specified coordinate
+   - Example: If Top Tag = "A1", then "TAG-001" goes in cell A1
+
+2. COORDINATE-VALUE DATA: Determines WHAT data goes where
+   - Contains mapping of coordinates to values for each tag
+   - Example: {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}
+
+COMPLETE PROCESS FLOW:
+1. System reads your data: {"TAG-001": {"B1": "Line 1", "C1": "PID-001"}}
+2. Top Tag places "TAG-001" at the key coordinate (e.g., A1)
+3. Coordinate-Value Data places "Line 1" at B1, "PID-001" at C1, etc.
+
+EXAMPLE WITH DETAILS:
+If Top Tag = "A1" and you have data like:
+{"TAG-001": {"B1": "Line 1", "C1": "PID-001", "D1": "100.5"}}
+
+Result in Excel:
+• Cell A1: "TAG-001" (the tag identifier from dictionary key)
+• Cell B1: "Line 1" (from coordinate-value data)
+• Cell C1: "PID-001" (from coordinate-value data)
+• Cell D1: "100.5" (from coordinate-value data)
+
+AUTOMATIC SETTING:
+• The Top Tag is automatically set to the first coordinate you add for the primary data source
+• You can manually change it if needed
+
+IMPORTANT NOTES:
+• The Top Tag is the ANCHOR POINT for all tag operations
+• All other data positioning is calculated relative to this coordinate
+• When updating existing sheets, the system looks for tags at this coordinate
+• When creating new sheets, tags are placed at this coordinate
+
+DIFFERENCE FROM DATASHEET COORDINATE:
+• Top Tag = Where TAG IDENTIFIERS (TAG-001, TAG-002) are placed
+• Datasheet Coordinate = Where SHEET NUMBERS (DS-001, DS-002) are placed for labeling
+

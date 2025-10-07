@@ -981,3 +981,31 @@ def show_nested_dict_analysis(dict_of_dicts):
 
     messagebox.showinfo("Nested Dictionary Key Analysis Results", message)
 # endregion
+
+# region GUI Utilities
+
+def center_window_over_parent(window):
+    """Center a window over its parent window"""
+    window.update_idletasks()
+    
+    # Get parent window (master)
+    parent = window.master
+    if parent:
+        # Get parent window geometry
+        parent_x = parent.winfo_x()
+        parent_y = parent.winfo_y()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        
+        # Get this window's size
+        window_width = window.winfo_width()
+        window_height = window.winfo_height()
+        
+        # Calculate center position
+        x = parent_x + (parent_width - window_width) // 2
+        y = parent_y + (parent_height - window_height) // 2
+        
+        # Set window position
+        window.geometry(f"+{x}+{y}")
+
+# endregion

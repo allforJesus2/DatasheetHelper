@@ -6,6 +6,7 @@ import ast
 import json
 import os
 from coords_to_fields_refactored import CoordsToFieldsGenerator
+from main_functions import center_window_over_parent
 
 
 def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet=1, selected_sheets=None):
@@ -101,6 +102,9 @@ class DatasheetExtractor:
         # Load sheets if file path was provided during initialization
         if file_path and os.path.exists(file_path):
             self.load_sheets_from_file(file_path)
+        
+        # Center the window over the parent window
+        center_window_over_parent(self.root)
 
     def create_widgets(self):
         # Create main frame to hold all content

@@ -1,0 +1,66 @@
+Datasheet Prefix
+================
+
+A text string used to IDENTIFY existing sheets to update AND to generate names for newly created sheets.
+
+DUAL PURPOSE:
+1. IDENTIFICATION: Filters which sheets to search for existing tags
+2. NAMING: Generates sheet names when creating new sheets (if rows_per_sheet > 1)
+
+HOW IT WORKS:
+
+IDENTIFICATION (Most Important):
+• The system scans sheets whose names START WITH this prefix
+• Only sheets with matching prefix are searched for existing tags to update
+• Protects other sheets (cover pages, summaries, etc.) from being scanned
+• Example: If prefix = "DS-", only sheets like "DS-001", "DS-ABC" are scanned
+
+NAMING (When Creating New Sheets):
+• If rows_per_sheet > 1: Creates numbered sheets like "DS-01", "DS-02", "DS-03"
+  - Format: {prefix}{number} (e.g., "DS-01", "Proj_02")
+  - Numbers are zero-padded (01, 02, 03, etc.)
+• If rows_per_sheet = 1: Uses the TAG NAME as the sheet name (prefix not used for naming)
+  - Example: If tag is "PV-101", sheet is named "PV-101" (prefix ignored for naming)
+
+WHEN TO LEAVE BLANK:
+
+Blank Prefix Behavior:
+• IDENTIFICATION: ALL sheets (except source sheet) are scanned for tags
+• NAMING: Generates names like "01", "02", "03" (just numbers, no prefix)
+
+⚠️ WARNING - Blank Prefix Risks:
+• May scan cover sheets, summary sheets, or other non-datasheet pages
+• Could try to read tags from sheets without the expected structure
+• Can cause errors or unexpected behavior
+• May accidentally update wrong sheets
+
+RECOMMENDATION: Always use a prefix unless you're certain all sheets should be processed
+
+EXAMPLES:
+
+Example 1: Standard Engineering Datasheets
+- Prefix: "DS-"
+- rows_per_sheet: 1
+- Tags: ["PV-101", "PV-102", "FT-201"]
+- Result: Sheets named "PV-101", "PV-102", "FT-201" (tag names used)
+- Only existing sheets starting with "DS-" are scanned for updates
+
+Example 2: Multi-Row Sheets
+- Prefix: "Sheet_"
+- rows_per_sheet: 10
+- Many tags
+- Result: Sheets named "Sheet_01", "Sheet_02", "Sheet_03", etc. (prefix + number)
+- Only existing sheets starting with "Sheet_" are scanned
+
+Example 3: Project-Specific
+- Prefix: "P12345_"
+- Separates this project's datasheets from others in the same workbook
+
+BEST PRACTICES:
+• Always use a descriptive prefix unless you have a specific reason not to
+• Keep prefixes short (Excel has a 31-character sheet name limit)
+• Use common conventions: "DS-", "DS_", "Sheet-", etc.
+• Include trailing dash or underscore for readability: "DS-" not "DS"
+• Be consistent within a project
+• Consider the prefix a SAFETY FILTER to protect other sheets
+

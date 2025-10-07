@@ -1,0 +1,86 @@
+Source Sheet Name
+=================
+
+The name of the template sheet in the destination workbook that will be copied when creating new datasheet pages.
+
+WHAT IT DOES:
+• Specifies which sheet serves as the template for new datasheets
+• When new tags need sheets, this template is copied and populated with data
+• This sheet contains your formatting, headers, layout, formulas, and styling
+• Essential for creating new sheets (optional if only updating existing ones)
+
+HOW IT WORKS:
+1. You have a template sheet with your desired layout (e.g., "Template", "Master", "Blank")
+2. When processing tags, the system:
+   - First updates any EXISTING tags found in sheets with matching prefix
+   - Then creates NEW sheets by copying this template for remaining tags
+3. Each new sheet is a duplicate of the source sheet with updated data
+
+WHEN TO USE:
+• Required: If you need to create new sheets for new tags
+• Optional: If you're only updating existing sheets
+
+LEAVING IT BLANK - UPDATE-ONLY MODE:
+
+If you leave the Source Sheet Name blank, the system operates in UPDATE-ONLY mode:
+
+What Happens:
+• ✅ UPDATES all existing tags found in sheets with matching prefix
+• ❌ DOES NOT create any new sheets for tags without existing sheets
+• Tags without matching sheets are simply skipped/ignored
+• No errors occur - they're silently omitted
+
+When to Use Blank:
+• You only want to update existing datasheets
+• You don't want any new sheets created
+• You're doing a data refresh of known tags only
+• Safety measure: prevents accidental sheet creation
+
+Example Scenario:
+- You have existing sheets: "DS-001", "DS-002", "DS-003"
+- Your data contains tags: "TAG-A", "TAG-B", "TAG-C", "TAG-D"
+- Existing sheets contain: "TAG-A" (in DS-001), "TAG-B" (in DS-002)
+
+With Blank Source Sheet:
+• "TAG-A" and "TAG-B" are updated in their existing sheets ✅
+• "TAG-C" and "TAG-D" are ignored (no sheets created) ⚠️
+
+With Source Sheet Specified:
+• "TAG-A" and "TAG-B" are updated in their existing sheets ✅
+• "TAG-C" gets a new sheet "DS-004" created ✅
+• "TAG-D" gets a new sheet "DS-005" created ✅
+
+EXAMPLE WORKFLOW:
+You have a workbook with:
+- Sheet "Template" - Your formatted datasheet template
+- Sheets "DS-001", "DS-002" - Existing datasheets
+
+Settings:
+- Source Sheet Name: "Template"
+- Datasheet Prefix: "DS-"
+
+Process:
+1. System finds existing tags in "DS-001", "DS-002"
+2. Updates those sheets with new data
+3. For any new tags, copies "Template" sheet and names it "DS-003", "DS-004", etc.
+4. Populates the new sheets with tag data
+
+TEMPLATE DESIGN TIPS:
+• Include all headers, labels, and fixed text
+• Set up formulas that reference cells (they'll work with new data)
+• Apply formatting, borders, colors as desired
+• Add logos, title blocks, or company information
+• Leave data cells empty - they'll be populated automatically
+
+IMPORTANT NOTES:
+• The source sheet itself is never modified
+• It serves purely as a copy template
+• You can have multiple source sheets, but only one is active per data source
+• The source sheet can be hidden if you don't want users to see it
+• Make sure the source sheet exists in the destination workbook
+
+DROPDOWN FEATURE:
+• The dropdown shows all sheets from the destination workbook
+• You can also type the sheet name directly
+• Sheet names are case-sensitive
+

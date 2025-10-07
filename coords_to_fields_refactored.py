@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 import xlwings as xw
+from main_functions import center_window_over_parent
 
 
 class CoordsToFieldsGenerator:
@@ -62,6 +63,10 @@ class CoordsToFieldsGenerator:
 
         self.update_listbox()
         self.coords_window.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Center the window over the parent window
+        center_window_over_parent(self.coords_window)
+        
         self.coords_window.after(200, self.update_entry)
 
     def add_implicit(self):

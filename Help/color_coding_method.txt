@@ -1,0 +1,26 @@
+Color Coding Method
+===================
+
+Controls how text is color-coded in the destination sheets to highlight data age or status.
+
+Options:
+1. "None (Black)" - All text appears in black, no color coding
+2. "new_red_old_green" - Newer data in red, older data in green
+3. "new_red" - Only newer data highlighted in red, rest in black
+
+Usage:
+- Select from the dropdown menu
+- Color coding helps visually distinguish between data from different time periods
+- Useful for tracking updates and comparing old vs. new specifications
+
+When to Use Each Option:
+- None (Black): When color coding is not needed or for formal documentation
+- new_red_old_green: When comparing two versions and want both highlighted
+- new_red: When you want to emphasize only the newest changes
+
+Tips:
+- Color coding does not affect cell background, only text color
+- Ensure your organization's documentation standards allow colored text
+- Colors are applied during the data writing process
+- If printing, consider that colors may not reproduce well in grayscale
+

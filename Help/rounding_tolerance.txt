@@ -1,0 +1,25 @@
+Rounding Tolerance
+==================
+
+Sets a threshold for intelligent rounding to "nice" numbers (round numbers that are close to the calculated value).
+
+Usage:
+- Enter a decimal value between 0 and 1 (e.g., 0.01, 0.05, 0.10)
+- Leave blank or enter 0 to disable intelligent rounding
+- Works in conjunction with "Significant Figures"
+
+How It Works:
+- If a rounded value is within this tolerance of a "round" number, use the round number instead
+- Example: With tolerance 0.05, a value of 9.96 might round to 10.0 instead of 9.96
+
+Examples:
+- "0.01" (1%) - Very strict, only round when very close to round numbers
+- "0.05" (5%) - Moderate, round to nearby round numbers
+- "0.10" (10%) - Lenient, more aggressive rounding to round numbers
+
+Tips:
+- Use small tolerances (0.01-0.03) for precise engineering data
+- Larger tolerances (0.05-0.10) work well for presentation or marketing materials
+- Set to 0 to disable this feature and use exact significant figure rounding
+- Be careful with critical specifications where exact values matter
+

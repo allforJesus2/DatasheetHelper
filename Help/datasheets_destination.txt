@@ -1,0 +1,16 @@
+Datasheets (Destination)
+=========================
+
+This field specifies the path to the Excel workbook where the extracted data will be written.
+
+Usage:
+- Click "Browse" to select an existing Excel file, or create a new one
+- The file can be in .xlsx or .xlsm format
+- This is the target workbook where all processed datasheets will be added or updated
+- Use "Map Coordinates" to configure field mappings for data extraction
+
+Tips:
+- Make sure you have write permissions to the selected file
+- If the file is open in Excel, close it before running Add/Update
+- Keep a backup of your destination file before running bulk operations
+
