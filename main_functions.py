@@ -1008,4 +1008,66 @@ def center_window_over_parent(window):
         # Set window position
         window.geometry(f"+{x}+{y}")
 
+def ask_combobox(title, prompt, options=None, parent=None, initialvalue=""):
+    """
+    Simple dialog with a combobox for selecting or typing a value.
+    
+    Args:
+        title: Dialog window title
+        prompt: Prompt text to display
+        options: List of options to show in dropdown (can be empty)
+        parent: Parent window to center over
+        initialvalue: Initial value to show in combobox
+        
+    Returns:
+        String value entered/selected, or None if cancelled
+    """
+    from tkinter import ttk
+    
+    dialog = Toplevel(parent)
+    dialog.title(title)
+    if parent:
+        dialog.transient(parent)
+    dialog.grab_set()
+    
+    result = [None]  # Use list to allow modification in nested function
+    
+    # Label
+    Label(dialog, text=prompt).pack(padx=20, pady=(20, 10))
+    
+    # Combobox
+    combo_var = tk.StringVar(value=initialvalue)
+    combo = ttk.Combobox(dialog, textvariable=combo_var, values=options or [], width=40)
+    combo.pack(padx=20, pady=10)
+    combo.focus_set()
+    
+    # Buttons
+    button_frame = Frame(dialog)
+    button_frame.pack(pady=(10, 20))
+    
+    def on_ok():
+        result[0] = combo_var.get()
+        dialog.destroy()
+    
+    def on_cancel():
+        dialog.destroy()
+    
+    Button(button_frame, text="OK", command=on_ok, width=10).pack(side=LEFT, padx=5)
+    Button(button_frame, text="Cancel", command=on_cancel, width=10).pack(side=LEFT, padx=5)
+    
+    # Bind Enter key to OK
+    combo.bind('<Return>', lambda e: on_ok())
+    combo.bind('<KP_Enter>', lambda e: on_ok())  # Numpad Enter
+    
+    # Center over parent
+    if parent:
+        center_window_over_parent(dialog)
+    
+    if parent:
+        parent.wait_window(dialog)
+    else:
+        dialog.wait_window()
+    
+    return result[0]
+
 # endregion

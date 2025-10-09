@@ -239,6 +239,10 @@ class DatasheetGeneratorApp:
         self.current_settings_file = None  # Track the currently loaded/saved settings file
         self.last_settings_file_path = "last_settings_file.txt"  # File to store the last settings file path
         
+        # History tracking for dialog inputs (keep last 7 entries)
+        self.split_keys_history = []  # Recent delimiters used in Split Keys
+        self.modify_keys_history = []  # Recent transformation codes used in Modify Keys
+        
         # Centralized data source definitions
         print("DEBUG: Setting up data source definitions...")
         self.data_sources = {}
@@ -700,6 +704,22 @@ class DatasheetGeneratorApp:
         sources_label = tk.Label(sources_frame, text="DATA SOURCES", font=("Arial", 10, "bold"), fg="green")
         sources_label.pack(side="left")
         
+        # Add search bar for data sources
+        search_frame = ttk.Frame(sources_frame)
+        search_frame.pack(side="left", padx=(10, 0))
+        
+        self.data_source_search_entry = tk.Entry(search_frame, width=25, foreground='gray')
+        self.data_source_search_entry.pack(side="left", padx=(0, 5))
+        self.data_source_search_entry.bind('<KeyRelease>', self.search_data_sources)
+        self.data_source_search_entry.insert(0, "Search keys/values...")
+        self.data_source_search_entry.bind('<FocusIn>', lambda e: self.clear_search_placeholder())
+        self.data_source_search_entry.bind('<FocusOut>', lambda e: self.restore_search_placeholder())
+        
+        # Clear search button
+        clear_search_btn = ttk.Button(search_frame, text="✕", width=3, 
+                                     command=self.clear_data_source_search)
+        clear_search_btn.pack(side="left")
+        
         # Add text entry and button to create new data source
         add_data_source_frame = ttk.Frame(sources_frame)
         add_data_source_frame.pack(side="right")
@@ -741,6 +761,220 @@ class DatasheetGeneratorApp:
         
         print("DEBUG: create_data_sources_notebook completed!")
     
+    def clear_search_placeholder(self):
+        """Clear the placeholder text when user focuses on search entry"""
+        if self.data_source_search_entry.get() == "Search keys/values...":
+            self.data_source_search_entry.delete(0, tk.END)
+            self.data_source_search_entry.config(foreground='black')
+    
+    def restore_search_placeholder(self):
+        """Restore the placeholder text when user leaves search entry empty"""
+        if not self.data_source_search_entry.get().strip():
+            self.data_source_search_entry.insert(0, "Search keys/values...")
+            self.data_source_search_entry.config(foreground='gray')
+            # Clear any search results
+            self.clear_data_source_search()
+    
+    def search_data_sources(self, event=None):
+        """Search through all data sources for the given substring in keys and values"""
+        search_text = self.data_source_search_entry.get().strip()
+        
+        # Don't search if it's the placeholder text or empty
+        if not search_text or search_text == "Search keys/values...":
+            # If search is empty, close the results window
+            if hasattr(self, 'search_results_window') and self.search_results_window.winfo_exists():
+                self.search_results_window.destroy()
+            return
+        
+        search_text_lower = search_text.lower()
+        
+        # Collect all matches across all data sources
+        all_matches = []
+        
+        for data_source in self.get_all_data_sources():
+            data = self.data_sources[data_source].get('data', {})
+            if not data:
+                continue
+            
+            # Search through the data
+            for key, value_dict in data.items():
+                # Skip if key is None or not a valid type
+                if key is None:
+                    continue
+                
+                # Check if search term matches the key
+                try:
+                    key_str = str(key).lower()
+                    if search_text_lower in key_str:
+                        all_matches.append({
+                            'data_source': data_source,
+                            'key': key,
+                            'match_type': 'key',
+                            'match_value': str(key)
+                        })
+                except (AttributeError, TypeError):
+                    # Skip keys that can't be converted to string
+                    continue
+                
+                # Check if search term matches any value in the nested dictionary
+                if isinstance(value_dict, dict):
+                    for field, value in value_dict.items():
+                        try:
+                            value_str = str(value).lower()
+                            if search_text_lower in value_str:
+                                all_matches.append({
+                                    'data_source': data_source,
+                                    'key': key,
+                                    'match_type': 'value',
+                                    'field': field,
+                                    'match_value': str(value)
+                                })
+                        except (AttributeError, TypeError):
+                            # Skip values that can't be converted to string
+                            continue
+        
+        # Update or create the results window
+        self.update_search_results(search_text, all_matches)
+    
+    def update_search_results(self, search_text, matches):
+        """Update or create search results window"""
+        # Check if window exists and is valid
+        window_exists = hasattr(self, 'search_results_window') and self.search_results_window.winfo_exists()
+        
+        if not window_exists:
+            # Create the window for the first time
+           self.create_search_results_window()
+        
+        center_window_over_parent(self.search_results_window)
+        # Update the window title
+        self.search_results_window.title(f"Search Results: '{search_text}'")
+        
+        # Update the count label
+        self.search_count_label.config(text=f"Found {len(matches)} match(es) for '{search_text}'")
+        
+        # Clear existing items in the treeview
+        for item in self.search_tree.get_children():
+            self.search_tree.delete(item)
+        
+        # Add new matches to treeview
+        for match in matches:
+            data_source = match['data_source']
+            key = match['key']
+            match_type = match['match_type']
+            field = match.get('field', '-')
+            value = match.get('match_value', '-')
+            
+            # Truncate long values
+            if len(value) > 100:
+                value = value[:97] + "..."
+            
+            self.search_tree.insert("", "end", values=(data_source, key, match_type, field, value))
+        
+        # If no matches, show a message in the treeview
+        if not matches:
+            self.search_tree.insert("", "end", values=("No matches found", "", "", "", ""))
+    
+    def create_search_results_window(self):
+        """Create the search results window (called once)"""
+        # Create results window
+        self.search_results_window = tk.Toplevel(self.root)
+        self.search_results_window.title("Search Results")
+        self.search_results_window.geometry("800x500")
+        
+        # Make window stay on top initially, but allow user to move it
+        self.search_results_window.transient(self.root)
+        
+        # Create frame with scrollbar
+        main_frame = ttk.Frame(self.search_results_window)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Add label showing count (will be updated)
+        self.search_count_label = tk.Label(main_frame, 
+                                           text="Searching...",
+                                           font=("Arial", 10, "bold"))
+        self.search_count_label.pack(anchor="w", pady=(0, 5))
+        
+        # Create treeview for results
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollbars
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical")
+        hsb = ttk.Scrollbar(tree_frame, orient="horizontal")
+        
+        # Treeview (store as instance variable)
+        self.search_tree = ttk.Treeview(tree_frame, 
+                                       columns=("Data Source", "Key", "Match Type", "Field", "Value"),
+                                       show="headings",
+                                       yscrollcommand=vsb.set,
+                                       xscrollcommand=hsb.set)
+        
+        vsb.config(command=self.search_tree.yview)
+        hsb.config(command=self.search_tree.xview)
+        
+        # Configure columns
+        self.search_tree.heading("Data Source", text="Data Source")
+        self.search_tree.heading("Key", text="Key")
+        self.search_tree.heading("Match Type", text="Match Type")
+        self.search_tree.heading("Field", text="Field")
+        self.search_tree.heading("Value", text="Value")
+        
+        self.search_tree.column("Data Source", width=120)
+        self.search_tree.column("Key", width=150)
+        self.search_tree.column("Match Type", width=100)
+        self.search_tree.column("Field", width=120)
+        self.search_tree.column("Value", width=280)
+        
+        # Pack treeview and scrollbars
+        self.search_tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+        
+        # Bind double-click to open data viewer
+        self.search_tree.bind("<Double-Button-1>", self.on_search_result_double_click)
+        
+        # Add close button
+        close_btn = ttk.Button(main_frame, text="Close", command=self.search_results_window.destroy)
+        close_btn.pack(pady=(10, 0))
+    
+    def on_search_result_double_click(self, event):
+        """Handle double-click on search result to open data viewer"""
+        # Get the selected item
+        selection = self.search_tree.selection()
+        if not selection:
+            return
+        
+        # Get the item's values
+        item = selection[0]
+        values = self.search_tree.item(item, 'values')
+        
+        # Extract the data source (first column)
+        if values and len(values) > 0:
+            data_source = values[0]
+            
+            # Check if it's a valid data source (not the "No matches found" row)
+            if data_source and data_source != "No matches found" and data_source in self.data_sources:
+                # Get the current search text to pass to the viewer
+                search_text = self.data_source_search_entry.get().strip()
+                if search_text == "Search keys/values...":
+                    search_text = ""
+                
+                # Open the data viewer for this data source with the search term
+                self.view_data(data_source=data_source, initial_search=search_text)
+    
+    def clear_data_source_search(self):
+        """Clear the search entry and close any open search results"""
+        self.data_source_search_entry.delete(0, tk.END)
+        self.data_source_search_entry.insert(0, "Search keys/values...")
+        self.data_source_search_entry.config(foreground='gray')
+        
+        # Close search results window if it exists
+        if hasattr(self, 'search_results_window') and self.search_results_window.winfo_exists():
+            self.search_results_window.destroy()
+    
     def update_all_tab_indicators(self):
         """Update indicators for all data source tabs"""
         for data_source in self.get_all_data_sources():
@@ -776,6 +1010,7 @@ class DatasheetGeneratorApp:
         # Ask for new name
         new_data_source = tk.simpledialog.askstring("Rename data source", 
                                                  f"Enter new name for '{old_data_source}':",
+                                                 parent=self.root,
                                                  initialvalue=old_data_source)
         
         if not new_data_source or new_data_source.strip() == "":
@@ -805,6 +1040,11 @@ class DatasheetGeneratorApp:
         if hasattr(self, 'data_source_ui_entries') and old_data_source in self.data_source_ui_entries:
             self.data_source_ui_entries[new_data_source] = self.data_source_ui_entries[old_data_source]
             del self.data_source_ui_entries[old_data_source]
+        
+        # Update file entries dictionary if it exists
+        if hasattr(self, 'data_source_file_entries') and old_data_source in self.data_source_file_entries:
+            self.data_source_file_entries[new_data_source] = self.data_source_file_entries[old_data_source]
+            del self.data_source_file_entries[old_data_source]
         
         # Update widget references dictionary
         if old_data_source in self.data_source_widgets:
@@ -996,6 +1236,11 @@ class DatasheetGeneratorApp:
             entry.insert(0, current_path)
         entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
+        # Store reference to the file entry for this data source
+        if not hasattr(self, 'data_source_file_entries'):
+            self.data_source_file_entries = {}
+        self.data_source_file_entries[data_source] = entry
+        
         # Buttons frame
         buttons = tk.Frame(file_row)
         buttons.pack(side=tk.RIGHT)
@@ -1110,9 +1355,18 @@ class DatasheetGeneratorApp:
         
         print(f"DEBUG: generate_generic_data for {name}")
         
-        # Get the file path from config
-        file_path = self.data_sources[data_source]['path']
-        print(f"DEBUG: Retrieved file_path: {file_path}")
+        # Get the file path from the entry widget first, fall back to config
+        file_path = None
+        if hasattr(self, 'data_source_file_entries') and data_source in self.data_source_file_entries:
+            entry = self.data_source_file_entries[data_source]
+            file_path = entry.get().strip()
+            print(f"DEBUG: Retrieved file_path from entry: {file_path}")
+        
+        # Fall back to config if entry is empty or doesn't exist
+        if not file_path:
+            file_path = self.data_sources[data_source]['path']
+            print(f"DEBUG: Retrieved file_path from config: {file_path}")
+        
         if not file_path:
             messagebox.showwarning("Warning", f"No file path set for {name}")
             return
@@ -1265,6 +1519,8 @@ class DatasheetGeneratorApp:
         self.menu_bar.add_cascade(label="File", menu=self.file_menu)
         
         # Add File menu items
+        self.file_menu.add_command(label="New Project", command=self.new_project)
+        self.file_menu.add_separator()
         self.file_menu.add_command(label="Load Settings", command=self.load_settings)
         self.file_menu.add_command(label="Save", command=self.save_settings, accelerator="Ctrl+S")
         self.file_menu.add_command(label="Save As", command=self.save_settings_as, accelerator="Ctrl+Shift+S")
@@ -1286,6 +1542,7 @@ class DatasheetGeneratorApp:
             ("View Coordinate Value Data", self.display_coordinate_values),
             ("Delete newly added datasheets", self.delete_added_sheets),
             ("Rebuild tabs", self.refresh_tab_content),
+            ("Sort Tabs", self.sort_tabs),
             ("Delete Certain Sheets by Prefix", self.delete_sheets_by_prefix),
             ("Excel Macros", self.open_excel_macros_window),
             ("Excel Regex Search App", self.open_excel_regex_search_app),
@@ -2092,19 +2349,17 @@ class DatasheetGeneratorApp:
         tab.reinitialize = reinitialize
         return tab
 
-    def create_filters_tab(self, tab, data_source):
-        print("DEBUG: Starting create_filters_tab...")
-        # Add filter frame
-
-        # Add explanatory label for filter functionality
-        filter_info_label = ttk.Label(tab, text="Can use comma to include multiple filter terms")
-        filter_info_label.pack(anchor="w", padx=5, pady=(2, 0))
-        add_frame = ttk.Frame(tab)
-        add_frame.pack(fill="x", padx=5, pady=2)
-
+    def _create_filter_ui(self, parent_widget, data_source, show_info_label=True):
+        """
+        Consolidated helper method to create filter UI.
+        Used by both create_filters_tab and set_tag_filters.
+        
+        Args:
+            parent_widget: The parent widget (tab or window) to add UI to
+            data_source: The data source name to configure filters for
+            show_info_label: Whether to show the info label at the top
+        """
         filters_entries = []
-        # Get combo values from the corresponding data source only
-        # Use a list that we can update when refreshing
         combo_values = []
         
         def refresh_combo_values():
@@ -2136,9 +2391,6 @@ class DatasheetGeneratorApp:
             
             print(f"Refreshed combo values for {data_source}: {combo_values}")
         
-        # Initial load of combo values
-        refresh_combo_values()
-
         def get_filter_values_for_header(header):
             """Get unique values for a specific header from the corresponding data source"""
             unique_values = set()
@@ -2185,13 +2437,19 @@ class DatasheetGeneratorApp:
             for name_entry, filter_entry in filters_entries:
                 name = name_entry.get()
                 filter_value = filter_entry.get()
-                if name and filter_value:
+                if name:  # Allow blank filter_value for filtering empty fields
                     self.data_sources[data_source]['tag_filters'].append([name, filter_value])
+            print(f"Saved Tag Filters for {data_source}: {self.data_sources[data_source]['tag_filters']}")
 
-        content_frame = ttk.Frame(tab)
+        # Add explanatory label if requested
+        if show_info_label:
+            filter_info_label = ttk.Label(parent_widget, text="Can use comma to include multiple filter terms")
+            filter_info_label.pack(anchor="w", padx=5, pady=(2, 0))
+
+        content_frame = ttk.Frame(parent_widget)
         content_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        button_frame = ttk.Frame(tab)
+        button_frame = ttk.Frame(parent_widget)
         button_frame.pack(fill="x", padx=5, pady=5)
 
         add_button = ttk.Button(button_frame, text="Add Filter", command=lambda: add_filter_row())
@@ -2203,10 +2461,19 @@ class DatasheetGeneratorApp:
         save_button = ttk.Button(button_frame, text="Save", command=save_filters)
         save_button.pack(side="right", padx=5)
 
+        # Initial load of combo values
+        refresh_combo_values()
+
+        # Populate initial rows with existing tag filters from data source
         for name, filter_value in self.data_sources[data_source]['tag_filters']:
             add_filter_row(name, filter_value)
 
         add_filter_row()  # Add empty row
+
+    def create_filters_tab(self, tab, data_source):
+        """Create filters tab using the consolidated filter UI helper"""
+        print("DEBUG: Starting create_filters_tab...")
+        self._create_filter_ui(tab, data_source, show_info_label=True)
 
     def create_transform_tab(self, tab, data_source):
         print("DEBUG: Starting create_transform_tab...")
@@ -2356,6 +2623,73 @@ class DatasheetGeneratorApp:
         
         print("DEBUG: refresh_tab_content completed")
 
+    def sort_tabs(self):
+        """Sort data source tabs alphabetically"""
+        try:
+            # Get current tab count
+            tab_count = self.data_sources_notebook.index("end")
+            
+            if tab_count == 0:
+                tk.messagebox.showinfo("Sort Tabs", "No tabs to sort.")
+                return
+            
+            # Get all tab names and their current indices
+            tab_info = []
+            for i in range(tab_count):
+                tab_name = self.data_sources_notebook.tab(i, "text")
+                tab_info.append((tab_name, i))
+            
+            # Remember the currently selected tab
+            try:
+                current_tab_index = self.data_sources_notebook.index("current")
+                current_tab_name = self.data_sources_notebook.tab(current_tab_index, "text")
+            except:
+                current_tab_name = None
+            
+            # Sort tab names alphabetically (case-insensitive)
+            sorted_tab_info = sorted(tab_info, key=lambda x: x[0].lower())
+            
+            # Check if already sorted
+            if tab_info == sorted_tab_info:
+                tk.messagebox.showinfo("Sort Tabs", "Tabs are already sorted alphabetically.")
+                return
+            
+            # Reorder tabs by moving them to their sorted positions
+            # We need to detach and reinsert tabs in the correct order
+            tabs_widgets = []
+            for tab_name, _ in sorted_tab_info:
+                # Find the tab widget by name
+                for i in range(self.data_sources_notebook.index("end")):
+                    if self.data_sources_notebook.tab(i, "text") == tab_name:
+                        tab_widget = self.data_sources_notebook.nametowidget(
+                            self.data_sources_notebook.tabs()[i]
+                        )
+                        tabs_widgets.append((tab_name, tab_widget))
+                        break
+            
+            # Remove all tabs
+            for i in range(tab_count - 1, -1, -1):
+                self.data_sources_notebook.forget(i)
+            
+            # Re-add tabs in sorted order
+            for tab_name, tab_widget in tabs_widgets:
+                self.data_sources_notebook.add(tab_widget, text=tab_name)
+            
+            # Restore the selected tab if it was remembered
+            if current_tab_name:
+                for i in range(self.data_sources_notebook.index("end")):
+                    if self.data_sources_notebook.tab(i, "text") == current_tab_name:
+                        self.data_sources_notebook.select(i)
+                        break
+            
+            tk.messagebox.showinfo("Sort Tabs", "Tabs have been sorted alphabetically.")
+            
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"Error sorting tabs: {str(e)}")
+            print(f"Error in sort_tabs: {e}")
+            import traceback
+            traceback.print_exc()
+
     def open_datasheet_config_window(self):
         """Open a new window with datasheet configuration options"""
         # Create new window
@@ -2493,6 +2827,7 @@ class DatasheetGeneratorApp:
 
 
     def set_tag_filters(self):
+        """Create a popup window to set tag filters for the primary data source using the consolidated helper"""
         # Get the current primary data source
         primary_data_source = self.get_primary_data_source()
         if not primary_data_source:
@@ -2502,70 +2837,12 @@ class DatasheetGeneratorApp:
         view_window = tk.Toplevel(self.root)
         view_window.title(f"Set Tag Filters for {primary_data_source} (Comma for OR). ReGenerate Coordinates if necessary")
 
-        filters_entries = []
-
-        # Get combo values using centralized system from all data sources
-        combo_values = []
-        for data_source in self.get_all_data_sources():
-            data = self.data_sources[data_source]['data']
-            if data:
-                for key, value in data.items():
-                    combo_values.extend(list(value.keys()))
-                    print(list(combo_values))
-                    break
-        
-        # Remove duplicates while preserving order
-        combo_values = list(dict.fromkeys(combo_values))
-
-        def add_filter_row(name='', filter_value=''):
-            new_row = len(filters_entries) + 1
-
-            name_label = tk.Label(view_window, text=f"Index Key {new_row}:")
-            name_label.grid(row=new_row, column=0)
-            name_entry = ttk.Combobox(view_window, values=combo_values)
-            name_entry.grid(row=new_row, column=1)
-            name_entry.set(name)  # Prepopulate with existing name
-
-            filter_label = tk.Label(view_window, text=f"Filter {new_row}:")
-            filter_label.grid(row=new_row, column=2)
-            filter_entry = tk.Entry(view_window)
-            filter_entry.grid(row=new_row, column=3)
-            filter_entry.insert(0, filter_value)  # Prepopulate with existing filter_value
-
-            filters_entries.append((name_entry, filter_entry))
-
-        def save_filters():
-            self.data_sources[primary_data_source]['tag_filters'].clear()  # Clear tag_filters to update with new values
-            for name_entry, filter_entry in filters_entries:
-                name = name_entry.get()
-                filter_value = filter_entry.get()
-                if name and filter_value:
-                    self.data_sources[primary_data_source]['tag_filters'].append([name, filter_value])
-
-            # For demonstration, you may print or use the tag_filters list here
-            print("Saved Tag Filters:")
-            print(self.data_sources[primary_data_source]['tag_filters'])
-
-            # Here, you might perform any required action with tag_filters
-
-        add_button = tk.Button(view_window, text="Add New", command=add_filter_row)
-        add_button.grid(row=0, column=0, columnspan=2, sticky='ew', padx=5, pady=5)
-
-        save_button = tk.Button(view_window, text="Save", command=save_filters)
-        save_button.grid(row=0, column=2, columnspan=2, sticky='ew', padx=5, pady=5)
-
-        # Populate initial rows with existing tag filters from data source
-        for name, filter_value in self.data_sources[primary_data_source]['tag_filters']:
-            add_filter_row(name, filter_value)
-
-        # Add an empty row at the end
-        add_filter_row()
+        # Use the consolidated filter UI helper
+        self._create_filter_ui(view_window, primary_data_source, show_info_label=True)
 
         # Configure row and column weights to make them expandable
-        for i in range(4):  # Assuming 4 rows in the layout (adjust if needed)
+        for i in range(4):
             view_window.grid_columnconfigure(i, weight=1)
-
-        view_window.mainloop()
 
     # endregion
 
@@ -2931,6 +3208,54 @@ class DatasheetGeneratorApp:
     # endregion
 
     # region Data Loading and Saving
+
+    def new_project(self):
+        """Create a new project by resetting all settings to default state"""
+        # Ask for confirmation
+        if messagebox.askyesno("New Project", "Create a new project? All unsaved changes will be lost."):
+            try:
+                # Clear current settings file reference
+                self.current_settings_file = None
+                
+                # Update window title to reflect no settings file
+                self.update_window_title()
+                
+                # Clear data sources (without confirmation dialogs)
+                self.data_sources.clear()
+                self.data_source_widgets.clear()
+                
+                # Reset Excel manager
+                if hasattr(self.excel_mgr, 'wb') and self.excel_mgr.wb:
+                    try:
+                        self.excel_mgr.wb.close()
+                    except:
+                        pass
+                    self.excel_mgr.wb = None
+                
+                if hasattr(self.excel_mgr, 'app') and self.excel_mgr.app:
+                    try:
+                        self.excel_mgr.app.quit()
+                    except:
+                        pass
+                    self.excel_mgr.app = None
+                
+                # Reset other attributes
+                self.new_sheets = []
+                self.halt_flag = False
+                self.is_processing = False
+                self.destination_datasheet = None
+                
+                # Clear entries
+                self.entries = []
+                
+                # Clean up entries and refresh UI
+                self.cleanup_entries()
+                self.refresh_data_sources_notebook()
+                
+                messagebox.showinfo("New Project", "New project created successfully.")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create new project: {str(e)}")
 
     def load_settings(self):
         """Load settings from a JSON file"""
@@ -3451,16 +3776,51 @@ class DatasheetGeneratorApp:
             self.refresh_tab_content()
             print(f"{name} data loaded from JSON")
 
-    def update_data_source_keys(self, data_source):
+    def update_history(self, history_list, new_value, max_items=7):
+        """
+        Update a history list with a new value, keeping only the last max_items.
+        Most recent items appear first in the list.
+        Only updates if the value is not already in the history.
+        
+        Args:
+            history_list: The list to update
+            new_value: The new value to add
+            max_items: Maximum number of items to keep (default 7)
+        """
+        # Only add if it's a new value (not already in history)
+        if new_value in history_list:
+            return  # Don't modify history if value already exists
+        
+        # Insert at the beginning (most recent first)
+        history_list.insert(0, new_value)
+        
+        # Trim to max_items
+        while len(history_list) > max_items:
+            history_list.pop()
+    
+    def update_data_source_keys(self, data_source, parent=None, refresh_callback=None):
         """Update keys for any data source using transformation code"""
         config = self.data_sources[data_source]
         name = data_source
         
-        code = askstring(f"Enter transformation code for keys in {name}", 
-                        f"Enter transformation code for {name}",
-                        initialvalue='"-".join(x.split("-")[-2:])')
+        # Default suggestion
+        default_code = '"-".join(x.split("-")[-2:])'
+        
+        # Build options list with history first, then default if not in history
+        options = self.modify_keys_history.copy()
+        if default_code not in options:
+            options.append(default_code)
+        
+        code = ask_combobox(f"Modify Keys - {name}", 
+                           f"Enter transformation code for {name}:",
+                           options=options,
+                           parent=parent,
+                           initialvalue=options[0] if options else default_code)
         
         if code:
+            # Update history
+            self.update_history(self.modify_keys_history, code)
+            
             data = self.data_sources[data_source]['data']
             transformed_data = transform_dictionary(data, code)
             self.data_sources[data_source]['data'] = transformed_data
@@ -3469,22 +3829,26 @@ class DatasheetGeneratorApp:
             self.add_checkmark_to_tab(data_source)
             
             print(f"{name} keys updated")
+            
+            # Refresh the display if callback provided
+            if refresh_callback:
+                refresh_callback()
 
     # endregion
 
     # region Data Display
 
-    def view_data(self, data_source=None):
+    def view_data(self, data_source=None, initial_search=""):
         """View data for a data source or special case"""
 
         # New approach - data_source parameter
         if data_source and data_source in self.data_sources:
             print(f"Viewing {data_source}")
-            self.display_data_source(data_source)
+            self.display_data_source(data_source, initial_search=initial_search)
         else:
             print(f"Unknown data source: {data_source}")
     
-    def display_data_source(self, data_source):
+    def display_data_source(self, data_source, initial_search=""):
         """Display data for any data source using the centralized system"""
         config = self.data_sources[data_source]
         name = data_source
@@ -3494,7 +3858,7 @@ class DatasheetGeneratorApp:
         view_window = tk.Toplevel(self.root)
         view_window.title(name)
         view_window.transient(self.root)
-        view_window.grab_set()
+        # Removed grab_set() to allow opening multiple viewers and interacting with search results
         
         dialog_width = 800  # Set a reasonable default width
         dialog_height = 600  # Set a reasonable default height
@@ -3511,7 +3875,7 @@ class DatasheetGeneratorApp:
         search_label = tk.Label(search_frame, text="Search:")
         search_label.pack(side=tk.LEFT, padx=(0, 5))
         
-        search_var = tk.StringVar()
+        search_var = tk.StringVar(value=initial_search)  # Set initial search value
         search_entry = tk.Entry(search_frame, textvariable=search_var, width=30)
         search_entry.pack(side=tk.LEFT, padx=5)
         
@@ -3553,13 +3917,27 @@ class DatasheetGeneratorApp:
 
         def split_keys():
             """Split composite keys based on delimiter"""
+            # Common delimiters
+            common_delimiters = [";", ",", "|", "-", "_", ":", "/"]
+            
+            # Build options list with history first, then common delimiters not in history
+            options = self.split_keys_history.copy()
+            for delim in common_delimiters:
+                if delim not in options:
+                    options.append(delim)
+            
             # Ask for delimiter
-            delimiter = askstring("Split Keys", 
-                                "Enter delimiter to split keys on (e.g., ';', ',', '|'):",
-                                initialvalue=";")
+            delimiter = ask_combobox("Split Keys", 
+                                    "Enter delimiter to split keys on:",
+                                    options=options,
+                                    parent=view_window,
+                                    initialvalue=options[0] if options else ";")
             
             if not delimiter:
                 return
+            
+            # Update history
+            self.update_history(self.split_keys_history, delimiter)
             
             # Get current data
             current_data = self.data_sources[data_source]['data']
@@ -3899,7 +4277,7 @@ class DatasheetGeneratorApp:
         paste_button.pack(side=tk.LEFT, padx=5)
         
         # Add Modify Keys button
-        modify_keys_button = tk.Button(button_frame, text="Modify Keys", command=lambda: self.update_data_source_keys(data_source))
+        modify_keys_button = tk.Button(button_frame, text="Modify Keys", command=lambda: self.update_data_source_keys(data_source, parent=view_window, refresh_callback=refresh_display))
         modify_keys_button.pack(side=tk.LEFT, padx=5)
         
         # Add Sort Data button
@@ -4061,6 +4439,10 @@ class DatasheetGeneratorApp:
             if search_text:
                 highlight_matches(search_text)
         reapply_search[0] = reapply_search_func
+        
+        # Trigger initial search highlighting if search term was provided
+        if initial_search:
+            highlight_matches(initial_search)
 
 
 
@@ -4100,9 +4482,7 @@ class DatasheetGeneratorApp:
                 self.excel_mgr.release_connection()
                 tk.messagebox.showinfo("Excel Released", 
                                      "xlwings connection has been released. The workbook remains open in Excel and you can now save it independently.")
-            else:
-                tk.messagebox.showinfo("No Connection", 
-                                     "No Excel connection is currently active.")
+
         except Exception as e:
             tk.messagebox.showerror("Error", 
                                   f"Error releasing Excel connection: {str(e)}")

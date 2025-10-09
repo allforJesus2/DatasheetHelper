@@ -253,25 +253,31 @@ class DatasheetExtractor:
 
         try:
             result = extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet, selected_sheets)
+            
             messagebox.showinfo("Result", "Data extraction completed successfully.")
+            
+            if not self.callback:
+                
+                save_path = filedialog.asksaveasfilename(defaultextension=".json",
+                                                    filetypes=[("JSON files", "*.json")])
 
-            save_path = filedialog.asksaveasfilename(defaultextension=".json",
-                                                     filetypes=[("JSON files", "*.json")])
+                if save_path:
+                    with open(save_path, 'w') as json_file:
+                        json.dump(result, json_file, indent=4)
+                    messagebox.showinfo("Save Successful", f"Result saved to {save_path}")
 
-            if save_path:
-                with open(save_path, 'w') as json_file:
-                    json.dump(result, json_file, indent=4)
-                messagebox.showinfo("Save Successful", f"Result saved to {save_path}")
+                    if messagebox.askyesno("Open File", "Do you want to open the saved file?"):
+                        os.startfile(save_path)
 
-                if messagebox.askyesno("Open File", "Do you want to open the saved file?"):
-                    os.startfile(save_path)
 
+                else:
+                    messagebox.showinfo("Save Cancelled", "Result was not saved.")
 
             else:
-                messagebox.showinfo("Save Cancelled", "Result was not saved.")
-
-            if self.callback:
                 self.callback(result)
+                # close the window
+                self.root.destroy()
+                
 
         except Exception as e:
             messagebox.showerror("Error", str(e))

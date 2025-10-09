@@ -49,6 +49,18 @@ class CoordsToFieldsGenerator:
         clear_button = tk.Button(frame1, text="Clear All", command=self.clear_all)
         clear_button.pack(side=tk.LEFT)
 
+        # Options frame for checkbox
+        options_frame = tk.Frame(self.coords_window)
+        options_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.deduplicate_blanks_var = tk.IntVar(value=0)  # Default checked
+        deduplicate_blanks_checkbox = tk.Checkbutton(
+            options_frame,
+            text="Deduplicate blank cells (keep searching until no blanks)",
+            variable=self.deduplicate_blanks_var
+        )
+        deduplicate_blanks_checkbox.pack(side=tk.LEFT)
+
         frame2 = tk.Frame(self.coords_window)
         frame2.pack(fill=tk.BOTH, expand=True)
 
@@ -128,20 +140,25 @@ class CoordsToFieldsGenerator:
             self._show_error("Failed to get value from cell to the left", e)
 
     def _handle_directional_selection(self, direction, fixed_coord, start_range, end_range):
-        """Unified handler for both vertical and horizontal selections"""
+        """Unified handler for both vertical and horizontal selections with iterative deduplication"""
         try:
+            # Collect all cell keys first (excluding merged cells that are not top-left)
+            cell_keys = []
             for pos in range(start_range, end_range + 1):
                 if direction == 'vertical':
                     cell_key = f"{fixed_coord}{pos}"
-                    header_value = self._find_header_in_direction(cell_key, 'left')
                 else:
                     col_letter = self.column_number_to_letter(pos)
                     cell_key = f"{col_letter}{fixed_coord}"
-                    header_value = self._find_header_in_direction(cell_key, 'up')
                 
-                if self.is_merged_cell_not_top_left(cell_key):
-                    continue
-                
+                if not self.is_merged_cell_not_top_left(cell_key):
+                    cell_keys.append(cell_key)
+            
+            # Get headers with iterative deduplication
+            headers_dict = self._get_headers_with_deduplication(cell_keys, direction)
+            
+            # Add to coords_dict
+            for cell_key, header_value in headers_dict.items():
                 if header_value:
                     self.coords_dict[cell_key] = header_value
                 else:
@@ -154,10 +171,17 @@ class CoordsToFieldsGenerator:
             direction_text = "vertical" if direction == 'vertical' else "horizontal"
             self._show_error(f"Failed to handle {direction_text} selection", e)
 
-    def _find_header_in_direction(self, cell_key, direction):
-        """Find header value in specified direction from a cell"""
+    def _find_header_in_direction(self, cell_key, direction, skip_count=0):
+        """Find header value in specified direction from a cell
+        
+        Args:
+            cell_key: The cell to search from
+            direction: 'left' or 'up'
+            skip_count: Number of non-empty cells to skip before returning value
+        """
         try:
             col, row = self._parse_cell_address(cell_key)
+            found_count = 0
             
             if direction == 'left':
                 col_num = self.column_letter_to_number(col)
@@ -166,19 +190,106 @@ class CoordsToFieldsGenerator:
                     check_cell = f"{check_col}{row}"
                     cell_value = self.get_cell_value(check_cell)
                     if cell_value and str(cell_value).strip():
-                        return cell_value
+                        if found_count == skip_count:
+                            return cell_value
+                        found_count += 1
             elif direction == 'up':
                 for check_row in range(row - 1, 0, -1):
                     check_cell = f"{col}{check_row}"
                     cell_value = self.get_cell_value(check_cell)
                     if cell_value and str(cell_value).strip():
-                        return cell_value
+                        if found_count == skip_count:
+                            return cell_value
+                        found_count += 1
             
             return None
             
         except Exception as e:
             print(f"Error finding header in {direction} direction for {cell_key}: {e}")
             return None
+    
+    def _get_headers_with_deduplication(self, cell_keys, direction, max_depth=5):
+        """Get headers for all cells with iterative deduplication
+        
+        Args:
+            cell_keys: List of cell addresses
+            direction: 'vertical' (search left) or 'horizontal' (search up)
+            max_depth: Maximum number of levels to search back
+            
+        Returns:
+            Dictionary mapping cell_key to concatenated header string
+        """
+        search_direction = 'left' if direction == 'vertical' else 'up'
+        deduplicate_blanks = self.deduplicate_blanks_var.get() == 1
+        
+        # Build headers level by level
+        headers_by_level = []  # List of lists, where headers_by_level[0] is the first level back
+        
+        for level in range(max_depth):
+            level_headers = []
+            for cell_key in cell_keys:
+                header = self._find_header_in_direction(cell_key, search_direction, skip_count=level)
+                # Convert to string, treating None and empty as ""
+                header_str = str(header).strip() if header is not None else ""
+                level_headers.append(header_str)
+            
+            headers_by_level.append(level_headers)
+            print(f"Level {level} headers: {level_headers}")
+            
+            # Check if we have unique headers at this level
+            if self._has_duplicates(level_headers, count_blanks=deduplicate_blanks):
+                print(f"Duplicates found at level {level}, continuing to next level...")
+                continue
+            else:
+                print(f"No duplicates at level {level}, stopping deduplication")
+                break
+        
+        # Concatenate all levels to create final headers
+        final_headers = {}
+        for i, cell_key in enumerate(cell_keys):
+            header_parts = []
+            # Collect all levels from outermost (deepest) to innermost (first level)
+            for level in range(len(headers_by_level) - 1, -1, -1):
+                part = headers_by_level[level][i]
+                if part:  # Only add non-empty parts
+                    header_parts.append(part)
+            
+            # Concatenate with underscore
+            if header_parts:
+                final_header = "_".join(header_parts)
+            else:
+                final_header = ""
+            
+            final_headers[cell_key] = final_header
+            print(f"Final header for {cell_key}: {final_header}")
+        
+        return final_headers
+    
+    def _has_duplicates(self, values, count_blanks=True):
+        """Check if a list has any duplicate values
+        
+        Args:
+            values: List of string values
+            count_blanks: If True, blank cells are treated as duplicates with each other.
+                         If False, blank cells are ignored in duplicate detection.
+            
+        Returns:
+            True if duplicates exist, False otherwise
+        """
+        # Count occurrences of each value
+        value_counts = {}
+        for val in values:
+            # If count_blanks is False and value is blank, skip it
+            if not count_blanks and val == "":
+                continue
+            value_counts[val] = value_counts.get(val, 0) + 1
+        
+        # Check if any value appears more than once
+        for count in value_counts.values():
+            if count > 1:
+                return True
+        
+        return False
 
     def _handle_2d_selection(self, start_col, end_col, start_row, end_row):
         """Handle 2D selection - concatenate left value + '_' + above value for each cell"""
@@ -540,7 +651,7 @@ class CoordsToFieldsGenerator:
 def main():
     root = tk.Tk()
     root.withdraw()
-    xlsxpath=r"C:\Users\dcaoili\OneDrive - Samuel Engineering\Documents\ON-OFF VALVES - WKM DynaSeal Ball copy.xlsx"
+    xlsxpath=r"C:\Users\dcaoili\SPEC-ME-11154 Air Diaphragm Pumps Rev 0.xlsx"
     generator = CoordsToFieldsGenerator(root, xlsxpath, {})
 
     generator.generate()

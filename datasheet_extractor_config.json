@@ -1,7 +1,7 @@
 {
-    "file_path": "S:/Projects/24317_Electra_CO_EPCM/Engineering/Instrumentation/DataSheets/LSVF Level Switch Vibrating Fork.xlsx",
-    "init_tag_coord": "c31",
-    "init_coords_to_fields": "{'C31': 'TAG NO.', 'E31': 'P&ID', 'F31': 'LINE / VESSEL\\nNO.', 'H31': 'SERVICE', 'Q31': 'PROCESS FLUID', 'C42': 'TAG NO.', 'E42': 'OPER. PRESS.\\n(kPag)', 'F42': 'DESIGN PRESS.\\n(kPag)', 'H42': 'OPER. TEMP.\\n(\u00b0C)', 'K42': 'DESIGN TEMP.\\n(\u00b0C)', 'N42': 'SPECIFIC GRAVITY'}",
-    "tags_per_sheet": "9",
+    "file_path": "S:/Projects/24317_Electra_CO_EPCM/Engineering/MechPiping/SpecsDataSheets/11844 Evaporator Pkg/SPEC-ME-11844 Evaporator Package Rev 1.xlsx",
+    "init_tag_coord": "d146",
+    "init_coords_to_fields": "{'D146': 'Equipment Tag No.', 'D147': 'Quantity', 'D148': 'Manufacturer', 'D149': 'Type', 'D150': 'Model Number', 'D151': 'Size, Dia. x Dia._in x in', 'D152': 'Capacity @ Head, design_gpm @ ft', 'D153': 'Materials of Construction', 'D154': 'Motor is Inverter Rated_Y/N(describe)', 'D155': 'Motor Design (NEMA, MG1, IEEE 841, etc.)_Y/N(describe)', 'D156': 'Motor Nameplate Power_HP (kW)', 'D157': 'Flow In-line Instrumentation_Y/N(describe)', 'D158': 'Vendor Required In-line Instrumentation_Y/N(describe)'}",
+    "tags_per_sheet": "1",
     "selected_sheets": []
 }
