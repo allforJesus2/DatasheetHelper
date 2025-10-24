@@ -494,7 +494,7 @@ class ExcelCellUpdater:
         """Open file dialog to select Excel file"""
         file_path = filedialog.askopenfilename(
             title="Select Excel File",
-            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")]
+            filetypes=[("Excel files", "*.xlsx *.xls *.xlsm"), ("All files", "*.*")]
         )
         
         if file_path:

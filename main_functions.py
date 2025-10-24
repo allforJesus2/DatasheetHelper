@@ -510,6 +510,11 @@ def apply_append_coloring(sheet, cell_address, current_value, new_value):
         else:
             if new_value is not None:
                 cell.value = new_value
+                # When old cell was blank and new value is added, make all text red
+                try:
+                    cell.api.Font.Color = (255, 0, 0)  # Red (RGB)
+                except Exception as e:
+                    print(f"Warning: Could not apply red color to new value in blank cell: {e}")
                 
     except Exception as e:
         print(f"Error applying append coloring: {e}")
@@ -595,181 +600,287 @@ def apply_green_highlighting(sheet, cell_address):
         print(f"Error applying green highlighting to {cell_address}: {e}")
 
 
+def create_or_get_sheet(datasheet, sheet_name, source_sheet=None, make_visible=True):
+    """
+    Safely get a sheet if it exists, or create it from a source sheet if provided.
+    This function prevents accidental deletion of existing sheets.
+
+    Args:
+        datasheet: The xlwings workbook object.
+        sheet_name: The name of the sheet to get or create.
+        source_sheet: The source sheet to copy if the target sheet doesn't exist.
+        make_visible: If True, ensures the sheet is visible.
+
+    Returns:
+        The sheet object.
+    """
+    try:
+        # Try to get the sheet if it already exists
+        sheet = datasheet.sheets[sheet_name]
+    except Exception:
+        # If it doesn't exist, create it by copying the source sheet
+        if source_sheet:
+            print(f"Sheet '{sheet_name}' not found. Creating a new one.")
+            sheet = source_sheet.copy(name=sheet_name)
+            if make_visible:
+                sheet.visible = True
+        else:
+            # If no source sheet is provided, we can't create it, so raise an error
+            raise ValueError(f"Sheet '{sheet_name}' does not exist and no source sheet was provided to create it.")
+            
+    return sheet
+
+def get_last_sheet_with_space(datasheet, ds_prefix, key_coordinate, rows_per_sheet, source_sheet_name):
+    """
+    Finds the last datasheet that has empty slots for tags.
+
+    Args:
+        datasheet: The xlwings workbook object.
+        ds_prefix: The prefix for datasheet names.
+        key_coordinate: The starting cell for tags (e.g., 'I12').
+        rows_per_sheet: The number of tags per sheet.
+        source_sheet_name: The name of the source/template sheet, to be ignored.
+
+    Returns:
+        A tuple (sheet_name, list_of_empty_coords) or (None, []) if no sheet has space.
+    """
+    datasheet_sheets = sorted([
+        sheet for sheet in datasheet.sheets 
+        if sheet.name.startswith(ds_prefix) and sheet.name != source_sheet_name
+    ], key=lambda s: s.name, reverse=True)
+
+    for sheet in datasheet_sheets:
+        empty_coords = []
+        for i in range(rows_per_sheet):
+            offset_coord = increment_cell_reference(key_coordinate, i)
+            tag_value = sheet.range(offset_coord).value
+            if not tag_value:
+                empty_coords.append(offset_coord)
+        
+        if empty_coords:
+            return sheet.name, empty_coords
+            
+    return None, []
+
+def find_available_slots(datasheet, ds_prefix, key_coordinate, rows_per_sheet, source_sheet_name):
+    """
+    Finds all empty tag slots in all existing datasheets.
+
+    Args:
+        datasheet: The xlwings workbook object.
+        ds_prefix: The prefix for datasheet names.
+        key_coordinate: The starting cell for tags.
+        rows_per_sheet: The number of tags per sheet.
+        source_sheet_name: The name of the source sheet to ignore.
+
+    Returns:
+        A list of tuples, where each tuple is (sheet_name, coordinate).
+    """
+    available_slots = []
+    
+    # Sort sheets to ensure a consistent order (e.g., DS01, DS02, ...)
+    datasheet_sheets = sorted([
+        sheet for sheet in datasheet.sheets 
+        if sheet.name.startswith(ds_prefix) and sheet.name != source_sheet_name
+    ], key=lambda s: s.name)
+
+    for sheet in datasheet_sheets:
+        for i in range(rows_per_sheet):
+            offset_coord = increment_cell_reference(key_coordinate, i)
+            tag_value = sheet.range(offset_coord).value
+            if not tag_value:
+                available_slots.append((sheet.name, offset_coord))
+                
+    return available_slots
+
+
 def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datasheet_coord, ds_prefix,
                    rows_per_sheet=1, custom_sort=None, key_coordinate='I12',
-                   sig_figs=4, tolerance=1e-2, halt_callback=None, cell_update_option=None, partial_match=False):
+                   sig_figs=4, tolerance=1e-2, halt_callback=None, cell_update_option=None, 
+                   partial_match=False, disable_green_highlight=False,
+                   fill_mode='always_new', update_matched=True):
     """
-    Manages Excel sheets by adding or updating data based on tags.
-    
-    Updates existing tags first, then creates new sheets for additional tags if a source sheet is provided.
+    Manages Excel sheets by adding or updating data based on tags, with multiple fill strategies.
     
     Args:
-        halt_callback: Optional function that returns True if the process should be halted
-        cell_update_option: Color coding option - None (black), "new_red_old_green" (current method), or "new_red" (character-level)
-        partial_match: If True, matches tags if found anywhere in cell text; if False, requires exact match
+        fill_mode (str): Strategy for adding new tags. Options:
+            - 'fill_blanks': Fill empty slots in existing sheets first, then create new sheets.
+            - 'continue_last': Fill empty slots on the last sheet, then create new sheets.
+            - 'always_new': Always create new sheets for new tags.
+            - 'ignore': Do not add any new tags, only update existing ones.
+        update_matched (bool): If True, updates data for tags that are already present.
+        (Other args are the same as before)
     """
-    # Determine if we can create new sheets
-    can_create_new_sheets = False
+    # Initialize statistics counters
+    stats = {'green_highlighted_cells': 0, 'updated_cells': 0, 'added_tags': 0}
+    added_sheets = set()
+
+    # Get source sheet object, if available
+    source_sheet = None
     if source_sheet_name:
         try:
             source_sheet = datasheet.sheets[source_sheet_name]
-            can_create_new_sheets = True
         except Exception as e:
-            print(f"Error accessing source sheet: {e}")
-            source_sheet = None
-    
-    # Find all existing tags
+            print(f"Warning: Source sheet '{source_sheet_name}' not found: {e}. Cannot create new sheets.")
+
+    # --- 1. Find all existing tags and their locations ---
     existing_tags = []
     for sheet in datasheet.sheets:
         if sheet.name == source_sheet_name:
             continue
-            
-        if sheet.name.startswith(ds_prefix) or ds_prefix == '' :
-            print(f"Processing sheet {sheet.name} since it starts with {ds_prefix}")
-            print('key_coordinate', key_coordinate)
+        if sheet.name.startswith(ds_prefix) or ds_prefix == '':
             for i in range(rows_per_sheet):
                 offset_coord = increment_cell_reference(key_coordinate, i)
                 tag_value = sheet.range(offset_coord).value
                 if tag_value:
-                    existing_tags.append((tag_value, sheet.name, offset_coord))
+                    existing_tags.append({'value': tag_value, 'sheet': sheet.name, 'coord': offset_coord})
     
-    print(f'Existing tags: {existing_tags}')
-    
-    # Helper function to check if a tag matches a cell value
-    def matches_tag(cell_value, tag, partial=False):
-        """Returns True if cell_value matches the tag based on partial_match setting"""
-        if cell_value is None:
-            return False
-        if partial:
-            # Partial match: check if tag is found in cell value (case-insensitive)
-            return str(tag).lower() in str(cell_value).lower()
-        else:
-            # Exact match
-            return cell_value == tag
-    
-    # Sort tags according to custom function or default alphabetical
-    sorted_keys = sorted(tag_cell_values, key=custom_sort) if custom_sort else tag_cell_values
-    
-    added_sheets = set()
-    # Process existing tags first
-    for tag in sorted_keys:
-        # Check if process should be halted
-        if halt_callback and halt_callback():
-            print("Process halted by user")
-            return list(added_sheets)
-            
-        # Find all instances of this tag in existing_tags list
-        tag_instances = []
-        for tag_value, sheet_name, tag_coord in existing_tags:
-            if matches_tag(tag_value, tag, partial_match):
-                tag_instances.append((sheet_name, tag_coord))
-        
-        if tag_instances:
-            # Update values for all instances of existing tag
-            print(f'Updating existing tag {tag} found in {len(tag_instances)} instance(s)')
-            for sheet_name, tag_coord in tag_instances:
-                target_sheet = datasheet.sheets[sheet_name]
-                
-                # Update cells for this tag
-                cell_values = tag_cell_values[tag]
-                try:
-                    row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
-                except (ValueError, IndexError) as e:
-                    print(f"Error calculating row offset for existing tag {tag}: {e}")
-                    print(f"tag_coord: '{tag_coord}', key_coordinate: '{key_coordinate}'")
-                    row_offset = 0  # Default to 0 if we can't calculate the offset
-                
-                for cell, value in cell_values.items():
-                    try:
-                        target_cell = increment_cell_reference(cell, row_offset)
-                        value = try_round_to_sigfigs(value, sig_figs, tolerance)
-                        update_cell_xlwings(target_sheet, target_cell, value, cell_update_option)
-                    except Exception as e:
-                        print(f"Error updating cell {cell} for tag {tag}: {e}")
-    
-    # Check for unmatched tags in existing sheets and highlight them in green
-    # For partial match mode, we need to check if any existing tag was matched
-    matched_existing_tags = set()
-    for tag_value, _, _ in existing_tags:
-        for tag in sorted_keys:
-            if matches_tag(tag_value, tag, partial_match):
-                matched_existing_tags.add(tag_value)
-                break
-    
-    unmatched_tag_instances = []
-    for tag_value, sheet_name, tag_coord in existing_tags:
-        if tag_value not in matched_existing_tags:
-            unmatched_tag_instances.append((tag_value, sheet_name, tag_coord))
-    
-    if unmatched_tag_instances:
-        print(f"Found {len(unmatched_tag_instances)} unmatched tag instances that will be highlighted in green")
-        for tag_value, sheet_name, tag_coord in unmatched_tag_instances:
-            target_sheet = datasheet.sheets[sheet_name]
-            print(f"Highlighting unmatched tag '{tag_value}' at {tag_coord} in sheet '{sheet_name}'")
-            apply_green_highlighting(target_sheet, tag_coord)
-    
-    # Create new sheets for remaining tags if we have a source sheet
-    if can_create_new_sheets:
-        count = len(existing_tags)
-        print(f"existing tags length: {len(existing_tags)}")
-        # Find remaining tags - those that don't match any existing tags
-        remaining_tags = []
-        for tag in sorted_keys:
-            has_match = any(matches_tag(tag_value, tag, partial_match) for tag_value, _, _ in existing_tags)
-            if not has_match:
-                remaining_tags.append(tag)
-        print(f"remaining tags length: {len(remaining_tags)}")
+    print(f"Found {len(existing_tags)} existing tags in the datasheet.")
 
-        for tag in remaining_tags:
-            # Check if process should be halted
-            if halt_callback and halt_callback():
-                print("Process halted by user")
-                return list(added_sheets)
-                
-            print(f'Adding new tag {tag}')
-            datasheet_no = get_unique_sheet_name(datasheet, ds_prefix, (count // rows_per_sheet) + 1)
-            print(f'Datasheet number: {datasheet_no}, count: {count}, rows per sheet: {rows_per_sheet}')
-            if rows_per_sheet == 1:
-                sheet_name = tag
-            else:
-                sheet_name = datasheet_no
-                
-            if count % rows_per_sheet == 0:
-                try:
-                    datasheet.sheets[sheet_name].delete()  # Remove if exists
-                except:
-                    pass
-                target_sheet = source_sheet.copy(name=sheet_name)
-                # Ensure the copied sheet is visible (fix for sheets being hidden)
-                target_sheet.visible = True
-                added_sheets.add(sheet_name)
-                update_cell_xlwings(target_sheet, datasheet_coord, datasheet_no, cell_update_option)
-            else:
-                target_sheet = datasheet.sheets[sheet_name]
-                
-            tag_coord = increment_cell_reference(key_coordinate, count % rows_per_sheet)
-            update_cell_xlwings(target_sheet, tag_coord, tag, cell_update_option)
+    # Helper for matching tags
+    def matches_tag(cell_value, tag, partial=False):
+        if cell_value is None: return False
+        return str(tag).lower() in str(cell_value).lower() if partial else cell_value == tag
+
+    # Sort incoming tags
+    sorted_source_tags = sorted(tag_cell_values.keys(), key=custom_sort) if custom_sort else list(tag_cell_values.keys())
+
+    # --- 2. Update existing tags if `update_matched` is True ---
+    if update_matched:
+        print("Update mode is ON. Checking for matched tags to update.")
+        for tag in sorted_source_tags:
+            if halt_callback and halt_callback(): return list(added_sheets), stats
             
-            # Update cells for this tag
-            cell_values = tag_cell_values[tag]
-            try:
-                row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
-            except (ValueError, IndexError) as e:
-                print(f"Error calculating row offset for tag {tag}: {e}")
-                print(f"tag_coord: '{tag_coord}', key_coordinate: '{key_coordinate}'")
-                row_offset = 0  # Default to 0 if we can't calculate the offset
+            tag_instances = [et for et in existing_tags if matches_tag(et['value'], tag, partial_match)]
             
-            for cell, value in cell_values.items():
-                try:
-                    target_cell = increment_cell_reference(cell, row_offset)
-                    value = try_round_to_sigfigs(value, sig_figs, tolerance)
-                    update_cell_xlwings(target_sheet, target_cell, value, cell_update_option)
-                except Exception as e:
-                    print(f"Error updating cell {cell} for tag {tag}: {e}")
+            if tag_instances:
+                print(f"Updating existing tag '{tag}' found in {len(tag_instances)} instance(s).")
+                for instance in tag_instances:
+                    target_sheet = datasheet.sheets[instance['sheet']]
+                    row_offset = int(instance['coord'][1:]) - int(key_coordinate[1:])
                     
-            count += 1
+                    for cell, value in tag_cell_values[tag].items():
+                        target_cell = increment_cell_reference(cell, row_offset)
+                        rounded_value = try_round_to_sigfigs(value, sig_figs, tolerance)
+                        if update_cell_xlwings(target_sheet, target_cell, rounded_value, cell_update_option):
+                            stats['updated_cells'] += 1
+    else:
+        print("Update mode is OFF. Skipping updates for matched tags.")
+
+    # --- 3. Identify which source tags are new ---
+    new_tags = []
+    for tag in sorted_source_tags:
+        if not any(matches_tag(et['value'], tag, partial_match) for et in existing_tags):
+            new_tags.append(tag)
     
-    return list(added_sheets)
+    print(f"Found {len(new_tags)} new tags to be added.")
+
+    # --- 4. Handle new tags based on the selected fill_mode ---
+    if fill_mode == 'ignore':
+        print("Fill mode is 'ignore'. No new tags will be added.")
+    
+    elif new_tags and source_sheet:
+        slots_to_fill = []
+
+        if fill_mode == 'fill_blanks':
+            print("Fill mode is 'fill_blanks'. Finding all available slots.")
+            available_slots = find_available_slots(datasheet, ds_prefix, key_coordinate, rows_per_sheet, source_sheet_name)
+            slots_to_fill = [(s_name, coord) for s_name, coord in available_slots]
+
+        elif fill_mode == 'continue_last':
+            print("Fill mode is 'continue_last'. Checking last sheet for space.")
+            last_sheet_name, empty_coords = get_last_sheet_with_space(datasheet, ds_prefix, key_coordinate, rows_per_sheet, source_sheet_name)
+            if last_sheet_name:
+                slots_to_fill = [(last_sheet_name, coord) for coord in empty_coords]
+
+        # --- Fill available slots first for 'fill_blanks' and 'continue_last' ---
+        tags_for_new_sheets = list(new_tags)
+        if slots_to_fill:
+            print(f"Found {len(slots_to_fill)} empty slots to fill.")
+            for i, tag in enumerate(new_tags):
+                if i >= len(slots_to_fill): break
+                if halt_callback and halt_callback(): return list(added_sheets), stats
+
+                sheet_name, tag_coord = slots_to_fill[i]
+                print(f"Filling slot at {tag_coord} in sheet '{sheet_name}' with tag '{tag}'.")
+                
+                target_sheet = datasheet.sheets[sheet_name]
+                update_cell_xlwings(target_sheet, tag_coord, tag, cell_update_option)
+                row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
+                
+                for cell, value in tag_cell_values[tag].items():
+                    target_cell = increment_cell_reference(cell, row_offset)
+                    rounded_value = try_round_to_sigfigs(value, sig_figs, tolerance)
+                    if update_cell_xlwings(target_sheet, target_cell, rounded_value, cell_update_option):
+                        stats['updated_cells'] += 1
+                
+                stats['added_tags'] += 1
+                tags_for_new_sheets.pop(0)
+
+        # --- Create new sheets for any remaining tags or for 'always_new' mode ---
+        if tags_for_new_sheets:
+            print(f"{len(tags_for_new_sheets)} tags remaining to be placed in new sheets.")
+            
+            # Start numbering new sheets after the last existing one
+            last_sheet_num = 0
+            sheet_names = [s.name for s in datasheet.sheets if s.name.startswith(ds_prefix)]
+            if sheet_names:
+                # Extract numbers from sheet names like 'DS-01', 'DS-02_1'
+                nums = [int(name.replace(ds_prefix, '').split('_')[0]) for name in sheet_names if name.replace(ds_prefix, '').split('_')[0].isdigit()]
+                if nums:
+                    last_sheet_num = max(nums)
+
+            new_sheet_count = 0
+            
+            for i, tag in enumerate(tags_for_new_sheets):
+                if halt_callback and halt_callback(): return list(added_sheets), stats
+                
+                # Determine sheet and row for the new tag
+                slot_in_new_sheets = i
+                if slot_in_new_sheets % rows_per_sheet == 0:
+                    new_sheet_count += 1
+                    sheet_num = last_sheet_num + new_sheet_count
+                    sheet_name = get_unique_sheet_name(datasheet, ds_prefix, sheet_num)
+                    
+                    target_sheet = create_or_get_sheet(datasheet, sheet_name, source_sheet)
+                    added_sheets.add(sheet_name)
+                    
+                    # Update datasheet number coordinate
+                    update_cell_xlwings(target_sheet, datasheet_coord, sheet_name, cell_update_option)
+
+                row_in_sheet = slot_in_new_sheets % rows_per_sheet
+                tag_coord = increment_cell_reference(key_coordinate, row_in_sheet)
+                
+                print(f"Adding new tag '{tag}' to sheet '{target_sheet.name}' at {tag_coord}.")
+                
+                # Write tag and its data
+                update_cell_xlwings(target_sheet, tag_coord, tag, cell_update_option)
+                row_offset = int(tag_coord[1:]) - int(key_coordinate[1:])
+                
+                for cell, value in tag_cell_values[tag].items():
+                    target_cell = increment_cell_reference(cell, row_offset)
+                    rounded_value = try_round_to_sigfigs(value, sig_figs, tolerance)
+                    if update_cell_xlwings(target_sheet, target_cell, rounded_value, cell_update_option):
+                        stats['updated_cells'] += 1
+                
+                stats['added_tags'] += 1
+
+    # --- 5. Highlight unmatched tags in existing sheets ---
+    if not disable_green_highlight:
+        matched_existing_tag_values = set()
+        for et in existing_tags:
+            if any(matches_tag(et['value'], st, partial_match) for st in sorted_source_tags):
+                matched_existing_tag_values.add(et['value'])
+        
+        unmatched_instances = [et for et in existing_tags if et['value'] not in matched_existing_tag_values]
+        if unmatched_instances:
+            print(f"Highlighting {len(unmatched_instances)} unmatched tag(s) in green.")
+            for instance in unmatched_instances:
+                target_sheet = datasheet.sheets[instance['sheet']]
+                apply_green_highlighting(target_sheet, instance['coord'])
+                stats['green_highlighted_cells'] += 1
+    
+    return list(added_sheets), stats
 
 # endregion
 

@@ -88,12 +88,14 @@ def split_text_on_first_number(text):
 
 
 class DatasheetExtractor:
-    def __init__(self, root, callback=None, file_path=None):
+    def __init__(self, root, callback=None, file_path=None, data_source=None, main_app=None):
         self.root = root
         self.root.title("Datasheet Data Extraction GUI")
         self.callback = callback
         self.config_file = "datasheet_extractor_config.json"
         self.initial_file_path = file_path
+        self.data_source = data_source
+        self.main_app = main_app
 
         self.create_widgets()
         self.create_top_menu()
@@ -325,7 +327,7 @@ class DatasheetExtractor:
                             This application allows users to extract data from Excel datasheets.""")
     
     def save_last_values(self):
-        """Save current entry values to config file"""
+        """Save current entry values to config file and data source extraction_settings"""
         config = {
             "file_path": self.file_path_entry.get(),
             "init_tag_coord": self.init_tag_coord_entry.get(),
@@ -334,6 +336,29 @@ class DatasheetExtractor:
             "selected_sheets": self.get_selected_sheets()
         }
         
+        # Save to data source extraction_settings if available
+        if self.data_source and self.main_app and hasattr(self.main_app, 'data_sources'):
+            if self.data_source in self.main_app.data_sources:
+                # Parse init_coords_to_fields from string to dict
+                try:
+                    init_coords_to_fields = eval(self.init_coords_to_fields_entry.get()) if self.init_coords_to_fields_entry.get() else {}
+                except:
+                    init_coords_to_fields = {}
+                
+                # Parse tags_per_sheet to int
+                try:
+                    tags_per_sheet = int(self.tags_per_sheet_entry.get()) if self.tags_per_sheet_entry.get().isdigit() else 1
+                except:
+                    tags_per_sheet = 1
+                
+                # Update extraction_settings
+                self.main_app.data_sources[self.data_source]['extraction_settings'] = {
+                    'init_tag_coord': self.init_tag_coord_entry.get(),
+                    'init_coords_to_fields': init_coords_to_fields,
+                    'tags_per_sheet': tags_per_sheet,
+                    'selected_sheets': self.get_selected_sheets()
+                }
+        
         try:
             with open(self.config_file, 'w') as f:
                 json.dump(config, f, indent=4)
@@ -341,17 +366,44 @@ class DatasheetExtractor:
             print(f"Error saving config: {e}")
     
     def load_last_values(self):
-        """Load last values from config file"""
+        """Load last values from config file or data source extraction_settings"""
         try:
-            # If initial file path is provided, use it and load other values from config
+            # Track if we loaded from data source extraction_settings
+            loaded_from_data_source = False
+            
+            # First try to load from data source extraction_settings if available
+            if self.data_source and self.main_app and hasattr(self.main_app, 'data_sources'):
+                if self.data_source in self.main_app.data_sources:
+                    extraction_settings = self.main_app.data_sources[self.data_source].get('extraction_settings', {})
+                    if extraction_settings:
+                        if "init_tag_coord" in extraction_settings:
+                            self.init_tag_coord_entry.insert(0, extraction_settings["init_tag_coord"])
+                        if "init_coords_to_fields" in extraction_settings:
+                            self.init_coords_to_fields_entry.insert(0, str(extraction_settings["init_coords_to_fields"]))
+                        if "tags_per_sheet" in extraction_settings:
+                            self.tags_per_sheet_entry.insert(0, str(extraction_settings["tags_per_sheet"]))
+                        if "selected_sheets" in extraction_settings and extraction_settings["selected_sheets"]:
+                            # Restore selected sheets after a short delay to ensure listbox is populated
+                            self.root.after(100, lambda: self.restore_selected_sheets(extraction_settings["selected_sheets"]))
+                        loaded_from_data_source = True
+            
+            # If initial file path is provided, use it
             if self.initial_file_path:
                 self.file_path_entry.insert(0, self.initial_file_path)
                 self.load_sheets_from_file(self.initial_file_path)
-                # Still load other values from config if available
+            
+            # Only load from config file if we didn't load from data source extraction_settings
+            if not loaded_from_data_source:
                 if os.path.exists(self.config_file):
                     with open(self.config_file, 'r') as f:
                         config = json.load(f)
                     
+                    # Populate entries with saved values
+                    if "file_path" in config and not self.initial_file_path:
+                        self.file_path_entry.insert(0, config["file_path"])
+                        # Load sheets if file path is available
+                        if config["file_path"]:
+                            self.load_sheets_from_file(config["file_path"])
                     if "init_tag_coord" in config:
                         self.init_tag_coord_entry.insert(0, config["init_tag_coord"])
                     if "init_coords_to_fields" in config:
@@ -361,25 +413,6 @@ class DatasheetExtractor:
                     if "selected_sheets" in config and config["selected_sheets"]:
                         # Restore selected sheets after a short delay to ensure listbox is populated
                         self.root.after(100, lambda: self.restore_selected_sheets(config["selected_sheets"]))
-            elif os.path.exists(self.config_file):
-                with open(self.config_file, 'r') as f:
-                    config = json.load(f)
-                
-                # Populate entries with saved values
-                if "file_path" in config:
-                    self.file_path_entry.insert(0, config["file_path"])
-                    # Load sheets if file path is available
-                    if config["file_path"]:
-                        self.load_sheets_from_file(config["file_path"])
-                if "init_tag_coord" in config:
-                    self.init_tag_coord_entry.insert(0, config["init_tag_coord"])
-                if "init_coords_to_fields" in config:
-                    self.init_coords_to_fields_entry.insert(0, config["init_coords_to_fields"])
-                if "tags_per_sheet" in config:
-                    self.tags_per_sheet_entry.insert(0, config["tags_per_sheet"])
-                if "selected_sheets" in config and config["selected_sheets"]:
-                    # Restore selected sheets after a short delay to ensure listbox is populated
-                    self.root.after(100, lambda: self.restore_selected_sheets(config["selected_sheets"]))
         except Exception as e:
             print(f"Error loading config: {e}")
     

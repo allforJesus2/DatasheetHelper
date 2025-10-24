@@ -619,7 +619,13 @@ class DatasheetGeneratorApp:
             'transform_key': None,
             'transformation_code': '',
             'coordinate_conversions': {},
-            'coordinate_combinations': {}
+            'coordinate_combinations': {},
+            'extraction_settings': {
+                'init_tag_coord': '',
+                'init_coords_to_fields': {},
+                'tags_per_sheet': 1,
+                'selected_sheets': []
+            }
         }
         default_config.update(config)
         
@@ -1283,59 +1289,6 @@ class DatasheetGeneratorApp:
         self.create_filters_tab(filters_tab, data_source)
         self.create_transform_tab(transform_tab, data_source)
         
-        # Create source sheet name frame below the coordinate tabs
-        source_sheet_frame = ttk.LabelFrame(parent, text=f"Source Sheet Configuration")
-        source_sheet_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        # Source sheet name row
-        source_sheet_row = tk.Frame(source_sheet_frame)
-        source_sheet_row.pack(fill=tk.X, padx=5, pady=5)
-        
-        # Help button
-        source_help_btn = tk.Button(source_sheet_row, text="?", width=2,
-                                    command=lambda: self.show_help("source_sheet_name.txt"))
-        source_help_btn.pack(side=tk.LEFT, padx=(5, 2))
-        
-        # Label
-        source_sheet_label = tk.Label(source_sheet_row, text="Source Sheet Name:", width=20)
-        source_sheet_label.pack(side=tk.LEFT, padx=(0, 5))
-        
-        # Combobox for source sheet name (allows typing and dropdown selection)
-        source_sheet_entry = ttk.Combobox(source_sheet_row, state="normal")
-        source_sheet_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # Store reference to the source sheet entry for this data source
-        if not hasattr(self, 'data_source_ui_entries'):
-            self.data_source_ui_entries = {}
-        self.data_source_ui_entries[data_source] = {
-            'source_sheet_entry': source_sheet_entry,
-            'top_tag_entry': None  # Will be set when top tag entry is created
-        }
-        
-        # Get existing sheet names and populate the combobox
-        try:
-            sheet_names = self.get_sheet_names()
-            source_sheet_entry['values'] = sheet_names
-        except Exception as e:
-            print(f"Warning: Could not load sheet names for source sheet dropdown: {e}")
-            source_sheet_entry['values'] = []
-        
-        # Set initial value
-        current_source_sheet = self.data_sources[data_source]['source_sheet_name']
-        # Ensure current_source_sheet is a string
-        source_sheet_value = str(current_source_sheet) if current_source_sheet is not None else ""
-        source_sheet_entry.set(source_sheet_value)
-        
-        # Bind change event to update the data source configuration
-        def update_source_sheet_name(event=None):
-            new_source_sheet = source_sheet_entry.get().strip()
-            self.data_sources[data_source]['source_sheet_name'] = new_source_sheet
-        
-        # Bind events for Combobox (supports both dropdown selection and typing)
-        source_sheet_entry.bind('<<ComboboxSelected>>', update_source_sheet_name)
-        source_sheet_entry.bind('<KeyRelease>', update_source_sheet_name)
-        source_sheet_entry.bind('<FocusOut>', update_source_sheet_name)
-        
         # Store reference to the config notebook for this data source
         if data_source not in self.data_source_widgets:
             self.data_source_widgets[data_source] = {}
@@ -1388,7 +1341,7 @@ class DatasheetGeneratorApp:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load JSON file:\n{str(e)}")
                 
-        elif file_extension in ['.xlsx', '.xls']:
+        elif file_extension in ['.xlsx', '.xls', '.xlsm']:
             # Show custom dialog for Excel processing
             choice = self.show_excel_processing_dialog(data_source, file_path)
             
@@ -1607,7 +1560,7 @@ class DatasheetGeneratorApp:
         
         # Datasheets Row (single destination)
         ds_frame = tk.Frame(left_section)
-        ds_frame.pack(fill=tk.X, pady=5)
+        ds_frame.pack(fill=tk.X, pady=2)
 
         # Help button
         ds_help_btn = tk.Button(ds_frame, text="?", width=2, 
@@ -1634,7 +1587,7 @@ class DatasheetGeneratorApp:
 
         # Datasheet Coordinate Row
         coord_frame = tk.Frame(left_section)
-        coord_frame.pack(fill=tk.X, pady=5)
+        coord_frame.pack(fill=tk.X, pady=2)
 
         # Help button
         coord_help_btn = tk.Button(coord_frame, text="?", width=2, 
@@ -1653,7 +1606,7 @@ class DatasheetGeneratorApp:
 
         # Datasheet Prefix Row
         prefix_frame = tk.Frame(left_section)
-        prefix_frame.pack(fill=tk.X, pady=5)
+        prefix_frame.pack(fill=tk.X, pady=2)
 
         # Help button
         prefix_help_btn = tk.Button(prefix_frame, text="?", width=2, 
@@ -1672,7 +1625,7 @@ class DatasheetGeneratorApp:
 
         # Rows per Sheet Row
         rows_frame = tk.Frame(left_section)
-        rows_frame.pack(fill=tk.X, pady=5)
+        rows_frame.pack(fill=tk.X, pady=2)
 
         # Help button
         rows_help_btn = tk.Button(rows_frame, text="?", width=2, 
@@ -1691,7 +1644,7 @@ class DatasheetGeneratorApp:
 
         # Significant Figures Row
         sig_figs_frame = tk.Frame(left_section)
-        sig_figs_frame.pack(fill=tk.X, pady=5)
+        sig_figs_frame.pack(fill=tk.X, pady=2)
 
         # Help button
         sig_figs_help_btn = tk.Button(sig_figs_frame, text="?", width=2, 
@@ -1710,7 +1663,7 @@ class DatasheetGeneratorApp:
 
         # Rounding Tolerance Row
         tolerance_frame = tk.Frame(left_section)
-        tolerance_frame.pack(fill=tk.X, pady=5)
+        tolerance_frame.pack(fill=tk.X, pady=2)
 
         # Help button
         tolerance_help_btn = tk.Button(tolerance_frame, text="?", width=2, 
@@ -1750,6 +1703,45 @@ class DatasheetGeneratorApp:
                                      values=["None (Black)", "new_red_old_green", "new_red"], 
                                      state="readonly", width=20)
         color_dropdown.pack(side=tk.LEFT, padx=5)
+
+        # Fill mode option
+        fill_mode_frame = tk.Frame(right_section)
+        fill_mode_frame.pack(fill=tk.X, pady=5)
+
+        fill_mode_label = tk.Label(fill_mode_frame, text="Fill Mode:", width=20)
+        fill_mode_label.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.fill_mode_var = tk.StringVar(value="continue_last")
+        fill_mode_dropdown = ttk.Combobox(fill_mode_frame, textvariable=self.fill_mode_var, 
+                                         values=["fill_blanks", "continue_last", "always_new", "ignore"], 
+                                         state="readonly", width=20)
+        fill_mode_dropdown.pack(side=tk.LEFT, padx=5)
+
+        # Update matched tags option
+        update_matched_frame = tk.Frame(right_section)
+        update_matched_frame.pack(fill=tk.X, pady=5)
+
+        update_matched_label = tk.Label(update_matched_frame, text="Update Matched Tags:", width=20)
+        update_matched_label.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.update_matched_var = tk.StringVar(value="update")
+        update_matched_dropdown = ttk.Combobox(update_matched_frame, textvariable=self.update_matched_var, 
+                                               values=["update", "skip"], 
+                                               state="readonly", width=20)
+        update_matched_dropdown.pack(side=tk.LEFT, padx=5)
+
+        # Green highlighting option
+        green_highlight_frame = tk.Frame(right_section)
+        green_highlight_frame.pack(fill=tk.X, pady=5)
+        
+        self.disable_green_highlight_var = tk.BooleanVar(value=False)
+        disable_green_highlight_checkbox = tk.Checkbutton(
+            green_highlight_frame,
+            text="Disable Green Cell Highlighting",
+            variable=self.disable_green_highlight_var,
+            font=("Arial", 9)
+        )
+        disable_green_highlight_checkbox.pack(anchor=tk.W)
 
         # Add/Update button
         self.generate_button = tk.Button(right_section, text="Add/Update",
@@ -1907,7 +1899,7 @@ class DatasheetGeneratorApp:
         left_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
         
         # Right side - Semantic mapping container
-        right_frame = ttk.LabelFrame(main_container, text="Semantic Mapping", padding="5")
+        right_frame = ttk.Frame(main_container, padding="5")
         right_frame.pack(side="right", fill="y", padx=(5, 0))
         right_frame.configure(width=300)  # Fixed width for right panel
         
@@ -1975,7 +1967,8 @@ class DatasheetGeneratorApp:
 
         # Coordinate entry row with cell values and selection info
         coord_frame = ttk.Frame(top_frame)
-        coord_frame.pack(fill="x", pady=(0, 5))
+        coord_frame.configure(width=50)
+        coord_frame.pack(pady=(0, 5), anchor="w")
         
         coord_label = ttk.Label(coord_frame, text="Enter Key Coordinate:")
         coord_label.pack(side="left")
@@ -2220,61 +2213,63 @@ class DatasheetGeneratorApp:
         
         # Min score is now only in the right panel
 
-        # --- Context Menu Setup ---
-        # Create context menu if it doesn't exist
-        if not hasattr(self, 'coord_context_menu'):
-            self.coord_context_menu = tk.Menu(self.root, tearoff=0)
-            self.coord_context_menu.add_command(label="Change Source Key", command=self.open_change_source_key_dialog)
-            self.coord_context_menu.add_separator()
-            self.coord_context_menu.add_command(label="Add/Edit Conversion", command=self.open_conversion_dialog)
-            self.coord_context_menu.add_command(label="Remove Conversion", command=self.remove_conversion)
-            self.coord_context_menu.add_command(label="Combine", command=self.open_combination_dialog)
-            self.coord_context_menu.add_command(label="Remove Combination", command=self.remove_combination)
-            self.coord_context_menu.add_separator()
-            self.coord_context_menu.add_command(label="Cancel")
+        # Source Sheet Configuration section (moved under Semantic Mapping)
+        source_sheet_frame = ttk.Frame(right_frame, padding="5")
+        source_sheet_frame.pack(fill="x", pady=(0, 10))
+        
+        # Source sheet name row
+        source_sheet_row = tk.Frame(source_sheet_frame)
+        source_sheet_row.pack(fill="x", pady=5)
+        
+        # Help button
+        source_help_btn = tk.Button(source_sheet_row, text="?", width=2,
+                                    command=lambda: self.show_help("source_sheet_name.txt"))
+        source_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
+        # Label
+        source_sheet_label = tk.Label(source_sheet_row, text="Source Sheet Name:", width=20)
+        source_sheet_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Combobox for source sheet name (allows typing and dropdown selection)
+        source_sheet_entry = ttk.Combobox(source_sheet_row, state="normal")
+        source_sheet_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # Store reference to the source sheet entry for this data source
+        if not hasattr(self, 'data_source_ui_entries'):
+            self.data_source_ui_entries = {}
+        self.data_source_ui_entries[data_source] = {
+            'source_sheet_entry': source_sheet_entry,
+            'top_tag_entry': None  # Will be set when top tag entry is created
+        }
+        
+        # Get existing sheet names and populate the combobox
+        try:
+            sheet_names = self.get_sheet_names()
+            source_sheet_entry['values'] = sheet_names
+        except Exception as e:
+            print(f"Warning: Could not load sheet names for source sheet dropdown: {e}")
+            source_sheet_entry['values'] = []
+        
+        # Set initial value
+        current_source_sheet = self.data_sources[data_source]['source_sheet_name']
+        # Ensure current_source_sheet is a string
+        source_sheet_value = str(current_source_sheet) if current_source_sheet is not None else ""
+        source_sheet_entry.set(source_sheet_value)
+        
+        # Bind change event to update the data source configuration
+        def update_source_sheet_name(event=None):
+            new_source_sheet = source_sheet_entry.get().strip()
+            self.data_sources[data_source]['source_sheet_name'] = new_source_sheet
+        
+        # Bind events for Combobox (supports both dropdown selection and typing)
+        source_sheet_entry.bind('<<ComboboxSelected>>', update_source_sheet_name)
+        source_sheet_entry.bind('<KeyRelease>', update_source_sheet_name)
+        source_sheet_entry.bind('<FocusOut>', update_source_sheet_name)
 
-        if not hasattr(self, 'selected_coord_for_context'):
-            self.selected_coord_for_context = None
-        if not hasattr(self, 'current_data_source_for_context'):
-            self.current_data_source_for_context = None
-
-        def show_coord_context_menu(event, listbox_widget, data_source):
-            # Select the item under the cursor
-            clicked_index = listbox_widget.nearest(event.y)
-            listbox_widget.selection_clear(0, tk.END)
-            listbox_widget.selection_set(clicked_index)
-            listbox_widget.activate(clicked_index)
-
-            selected_text = listbox_widget.get(clicked_index)
-            # Extract coordinate (part before ':')
-            self.selected_coord_for_context = selected_text.split(':')[0].strip()
-            # Store the current data source for context menu actions
-            self.current_data_source_for_context = data_source
-
-            # Check if conversion exists and enable/disable "Remove Conversion"
-            if self.selected_coord_for_context in self.data_sources[data_source]['coordinate_conversions']:
-                self.coord_context_menu.entryconfig("Remove Conversion", state="normal")
-            else:
-                self.coord_context_menu.entryconfig("Remove Conversion", state="disabled")
-
-            # Check if combination exists and enable/disable "Remove Combination"
-            if self.selected_coord_for_context in self.data_sources[data_source]['coordinate_combinations']:
-                self.coord_context_menu.entryconfig("Remove Combination", state="normal")
-            else:
-                self.coord_context_menu.entryconfig("Remove Combination", state="disabled")
-
-            # Popup the menu
-            try:
-                self.coord_context_menu.tk_popup(event.x_root, event.y_root)
-            finally:
-                self.coord_context_menu.grab_release()
-
-        # Bind right-click to this specific listbox
-        listbox.bind("<Button-3>", lambda event, l=listbox, dt=data_source: show_coord_context_menu(event, l, dt))
-        # ---
-
-        update_listboxes()
-
+        # Save/Load Coordinate Maps buttons
+        save_load_frame = ttk.Frame(right_frame)
+        save_load_frame.pack(fill="x", pady=(0, 10))
+        
         # Save/Load coordinate maps functionality
         def save_coordinate_maps():
             """Save all coordinate maps to a JSON file"""
@@ -2331,19 +2326,71 @@ class DatasheetGeneratorApp:
                                 self.data_sources[data_source]['coordinate_combinations'] = coordinate_data['combinations'][data_source]
                     
                     # Update the UI
-                    update_listboxes()
+                    self.refresh_tab_content()
                     messagebox.showinfo("Success", f"Coordinate maps loaded from {file_path}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load coordinate maps: {e}")
-        
-        # Add Save/Load buttons to the coordinates tab
-        save_load_frame = ttk.Frame(tab)
-        save_load_frame.pack(fill="x", padx=10, pady=5)
         
         ttk.Button(save_load_frame, text="Save Coordinate Maps", 
                    command=save_coordinate_maps).pack(side="left", padx=5)
         ttk.Button(save_load_frame, text="Load Coordinate Maps", 
                    command=load_coordinate_maps).pack(side="left", padx=5)
+
+        # --- Context Menu Setup ---
+        # Create context menu if it doesn't exist
+        if not hasattr(self, 'coord_context_menu'):
+            self.coord_context_menu = tk.Menu(self.root, tearoff=0)
+            self.coord_context_menu.add_command(label="Change Source Key", command=self.open_change_source_key_dialog)
+            self.coord_context_menu.add_separator()
+            self.coord_context_menu.add_command(label="Add/Edit Conversion", command=self.open_conversion_dialog)
+            self.coord_context_menu.add_command(label="Remove Conversion", command=self.remove_conversion)
+            self.coord_context_menu.add_command(label="Combine", command=self.open_combination_dialog)
+            self.coord_context_menu.add_command(label="Remove Combination", command=self.remove_combination)
+            self.coord_context_menu.add_separator()
+            self.coord_context_menu.add_command(label="Cancel")
+
+        if not hasattr(self, 'selected_coord_for_context'):
+            self.selected_coord_for_context = None
+        if not hasattr(self, 'current_data_source_for_context'):
+            self.current_data_source_for_context = None
+
+        def show_coord_context_menu(event, listbox_widget, data_source):
+            # Select the item under the cursor
+            clicked_index = listbox_widget.nearest(event.y)
+            listbox_widget.selection_clear(0, tk.END)
+            listbox_widget.selection_set(clicked_index)
+            listbox_widget.activate(clicked_index)
+
+            selected_text = listbox_widget.get(clicked_index)
+            # Extract coordinate (part before ':')
+            self.selected_coord_for_context = selected_text.split(':')[0].strip()
+            # Store the current data source for context menu actions
+            self.current_data_source_for_context = data_source
+
+            # Check if conversion exists and enable/disable "Remove Conversion"
+            if self.selected_coord_for_context in self.data_sources[data_source]['coordinate_conversions']:
+                self.coord_context_menu.entryconfig("Remove Conversion", state="normal")
+            else:
+                self.coord_context_menu.entryconfig("Remove Conversion", state="disabled")
+
+            # Check if combination exists and enable/disable "Remove Combination"
+            if self.selected_coord_for_context in self.data_sources[data_source]['coordinate_combinations']:
+                self.coord_context_menu.entryconfig("Remove Combination", state="normal")
+            else:
+                self.coord_context_menu.entryconfig("Remove Combination", state="disabled")
+
+            # Popup the menu
+            try:
+                self.coord_context_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self.coord_context_menu.grab_release()
+
+        # Bind right-click to this specific listbox
+        listbox.bind("<Button-3>", lambda event, l=listbox, dt=data_source: show_coord_context_menu(event, l, dt))
+        # ---
+
+        update_listboxes()
+
 
         # Expose reinitialize method for external calls
         tab.reinitialize = reinitialize
@@ -3164,10 +3211,11 @@ class DatasheetGeneratorApp:
             color_option = self.color_coding_var.get()
             if color_option == "None (Black)":
                 color_option = None
+            # 'no_update' option is passed as-is
             print('color_option', color_option)
             print('partial_match', primary_partial_match)
             
-            self.new_sheets = add_update_datasheets(self.excel_mgr.wb, primary_source_sheet_name,
+            self.new_sheets, self.generation_statistics = add_update_datasheets(self.excel_mgr.wb, primary_source_sheet_name,
                                             self.tag_cell_values, self.datasheet_coord,
                                             self.ds_str, rows_per_sheet=self.rows_per_sheet,
                                             key_coordinate=primary_top_tag,
@@ -3175,7 +3223,9 @@ class DatasheetGeneratorApp:
                                             tolerance=self.rounding_tolerance, # Pass tolerance
                                             halt_callback=self.check_halt_flag, # Pass halt callback
                                             cell_update_option=color_option, # Pass color coding option
-                                            partial_match=primary_partial_match) # Pass partial match option
+                                            partial_match=primary_partial_match, # Pass partial match option
+                                            disable_green_highlight=self.disable_green_highlight_var.get(), # Pass green highlighting option
+                                            fill_mode=self.fill_mode_var.get()) # Pass fill mode option
             self.excel_mgr.mark_as_modified()
             
             if self.halt_flag:
@@ -3381,7 +3431,20 @@ class DatasheetGeneratorApp:
                     'top_tag': config.get('top_tag', ''),
                     'source_sheet_name': config.get('source_sheet_name', ''),
                     'data': config.get('data', {}),
-                    'path': config.get('path', '')
+                    'path': config.get('path', ''),
+                    'partial_match': config.get('partial_match', False),
+                    'tag_filters': config.get('tag_filters', []),
+                    'transform_data_source': config.get('transform_data_source', None),
+                    'transform_key': config.get('transform_key', None),
+                    'transformation_code': config.get('transformation_code', ''),
+                    'coordinate_conversions': config.get('coordinate_conversions', {}),
+                    'coordinate_combinations': config.get('coordinate_combinations', {}),
+                    'extraction_settings': config.get('extraction_settings', {
+                        'init_tag_coord': '',
+                        'init_coords_to_fields': {},
+                        'tags_per_sheet': 1,
+                        'selected_sheets': []
+                    })
                 }
             
             # Write to file
@@ -3452,7 +3515,20 @@ class DatasheetGeneratorApp:
                     'top_tag': config.get('top_tag', ''),
                     'source_sheet_name': config.get('source_sheet_name', ''),
                     'data': config.get('data', {}),
-                    'path': config.get('path', '')
+                    'path': config.get('path', ''),
+                    'partial_match': config.get('partial_match', False),
+                    'tag_filters': config.get('tag_filters', []),
+                    'transform_data_source': config.get('transform_data_source', None),
+                    'transform_key': config.get('transform_key', None),
+                    'transformation_code': config.get('transformation_code', ''),
+                    'coordinate_conversions': config.get('coordinate_conversions', {}),
+                    'coordinate_combinations': config.get('coordinate_combinations', {}),
+                    'extraction_settings': config.get('extraction_settings', {
+                        'init_tag_coord': '',
+                        'init_coords_to_fields': {},
+                        'tags_per_sheet': 1,
+                        'selected_sheets': []
+                    })
                 }
             
             # Write to file
@@ -3753,7 +3829,7 @@ class DatasheetGeneratorApp:
             print(f"{name} data loaded from datasheet")
         
         app_window = tk.Toplevel(self.root)
-        DatasheetExtractor(app_window, callback=set_data, file_path=file_path)
+        DatasheetExtractor(app_window, callback=set_data, file_path=file_path, data_source=data_source, main_app=self)
 
     def load_data_source_from_json(self, data_source):
         """Load data for any data source from JSON file"""
@@ -4060,7 +4136,7 @@ class DatasheetGeneratorApp:
             sort_dialog.title("Sort Data")
             sort_dialog.transient(view_window)
             sort_dialog.grab_set()
-            
+            center_window_over_parent(sort_dialog)
             # Center the dialog
             dialog_width = 400
             dialog_height = 250
@@ -4182,6 +4258,357 @@ class DatasheetGeneratorApp:
             tk.Button(button_frame_sort, text="Apply", command=apply_sort).pack(side=tk.LEFT, padx=5)
             tk.Button(button_frame_sort, text="Cancel", command=sort_dialog.destroy).pack(side=tk.LEFT, padx=5)
 
+        def layered_sort_data():
+            """Apply multiple sort layers to the dictionary data"""
+            current_data = self.data_sources[data_source]['data']
+            if not current_data:
+                tk.messagebox.showwarning("No Data", f"No {name} data available to sort.")
+                return
+            
+            # Create a dialog for layered sorting
+            layered_sort_dialog = tk.Toplevel(view_window)
+            layered_sort_dialog.title("Layered Sort Data")
+            layered_sort_dialog.transient(view_window)
+            layered_sort_dialog.grab_set()
+            center_window_over_parent(layered_sort_dialog)
+            
+            dialog_width = 600
+            dialog_height = 500
+            layered_sort_dialog.geometry(f"{dialog_width}x{dialog_height}")
+            
+            # Main frame
+            main_frame = tk.Frame(layered_sort_dialog)
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            
+            # Instructions
+            instructions = tk.Label(main_frame, 
+                                   text="Create multiple sort layers. Each layer will be applied in order (1st layer has highest priority).",
+                                   font=('Arial', 9), fg='blue')
+            instructions.pack(anchor=tk.W, pady=(0, 10))
+            
+            # Sort layers frame
+            layers_frame = tk.LabelFrame(main_frame, text="Sort Layers", padx=10, pady=10)
+            layers_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Listbox to show sort layers
+            layers_listbox = tk.Listbox(layers_frame, height=8)
+            layers_listbox.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+            
+            # Scrollbar for listbox
+            layers_scrollbar = tk.Scrollbar(layers_frame, orient=tk.VERTICAL, command=layers_listbox.yview)
+            layers_listbox.configure(yscrollcommand=layers_scrollbar.set)
+            
+            # Sort layers storage
+            sort_layers = []
+            
+            def get_nested_value(obj, field_path):
+                """Get value from nested dictionary using dot notation"""
+                keys = field_path.split('.')
+                value = obj
+                for key in keys:
+                    if isinstance(value, dict):
+                        value = value.get(key)
+                        if value is None:
+                            return None
+                    else:
+                        return None
+                return value
+            
+            def update_layers_display():
+                """Update the listbox display of sort layers"""
+                layers_listbox.delete(0, tk.END)
+                for i, layer in enumerate(sort_layers):
+                    layer_text = f"{i+1}. {layer['type']} ({'Descending' if layer['reverse'] else 'Ascending'})"
+                    if layer['type'] == 'field' and layer['field']:
+                        layer_text += f" - Field: {layer['field']}"
+                    elif layer['type'] == 'custom':
+                        layer_text += f" - Pattern: {layer['pattern']}"
+                        if layer['custom_sort_by'] == 'field' and layer['custom_field']:
+                            layer_text += f" (Field: {layer['custom_field']})"
+                        elif layer['custom_sort_by'] == 'key':
+                            layer_text += " (Keys)"
+                        elif layer['custom_sort_by'] == 'value':
+                            layer_text += " (Values)"
+                    layers_listbox.insert(tk.END, layer_text)
+            
+            def add_sort_layer():
+                """Add a new sort layer"""
+                layer_dialog = tk.Toplevel(layered_sort_dialog)
+                layer_dialog.title("Add Sort Layer")
+                layer_dialog.transient(layered_sort_dialog)
+                layer_dialog.grab_set()
+                layer_dialog.geometry("400x300")
+                center_window_over_parent(layer_dialog)
+                
+                # Sort type selection
+                type_frame = tk.LabelFrame(layer_dialog, text="Sort Type", padx=10, pady=10)
+                type_frame.pack(fill=tk.X, padx=10, pady=10)
+                
+                sort_type_var = tk.StringVar(value="key")
+                tk.Radiobutton(type_frame, text="Sort by Keys", variable=sort_type_var, value="key").pack(anchor=tk.W)
+                tk.Radiobutton(type_frame, text="Sort by Values", variable=sort_type_var, value="value").pack(anchor=tk.W)
+                tk.Radiobutton(type_frame, text="Sort by Field in Value", variable=sort_type_var, value="field").pack(anchor=tk.W)
+                tk.Radiobutton(type_frame, text="Custom Sort Pattern", variable=sort_type_var, value="custom").pack(anchor=tk.W)
+                
+                # Field entry for field sorting
+                field_frame = tk.Frame(type_frame)
+                field_frame.pack(anchor=tk.W, pady=5)
+                tk.Label(field_frame, text="Field:").pack(side=tk.LEFT)
+                field_entry = tk.Entry(field_frame, width=20)
+                field_entry.pack(side=tk.LEFT, padx=5)
+                
+                # Custom sort pattern entry
+                custom_frame = tk.Frame(type_frame)
+                custom_frame.pack(anchor=tk.W, pady=5)
+                tk.Label(custom_frame, text="Pattern:").pack(side=tk.LEFT)
+                pattern_entry = tk.Entry(custom_frame, width=30)
+                pattern_entry.pack(side=tk.LEFT, padx=5)
+                
+                # Custom sort options
+                custom_options_frame = tk.Frame(type_frame)
+                custom_options_frame.pack(anchor=tk.W, pady=5)
+                
+                # Sort by option for custom
+                custom_sort_by_var = tk.StringVar(value="key")
+                tk.Radiobutton(custom_options_frame, text="Apply to Keys", variable=custom_sort_by_var, value="key").pack(side=tk.LEFT, padx=5)
+                tk.Radiobutton(custom_options_frame, text="Apply to Values", variable=custom_sort_by_var, value="value").pack(side=tk.LEFT, padx=5)
+                tk.Radiobutton(custom_options_frame, text="Apply to Field", variable=custom_sort_by_var, value="field").pack(side=tk.LEFT, padx=5)
+                
+                # Field entry for custom field sorting
+                custom_field_frame = tk.Frame(type_frame)
+                custom_field_frame.pack(anchor=tk.W, pady=2)
+                tk.Label(custom_field_frame, text="Field for Custom:").pack(side=tk.LEFT)
+                custom_field_entry = tk.Entry(custom_field_frame, width=20)
+                custom_field_entry.pack(side=tk.LEFT, padx=5)
+                
+                # Helper text for custom patterns
+                tk.Label(type_frame, text="Examples: '\\d+' (numbers), '\\d{4}' (4-digit numbers), '[A-Z]+' (letters)", 
+                        font=('Arial', 8), fg='gray').pack(anchor=tk.W, padx=20, pady=(5, 0))
+                
+                # Direction selection
+                direction_frame = tk.LabelFrame(layer_dialog, text="Sort Direction", padx=10, pady=10)
+                direction_frame.pack(fill=tk.X, padx=10, pady=10)
+                
+                direction_var = tk.StringVar(value="ascending")
+                tk.Radiobutton(direction_frame, text="Ascending (A-Z)", variable=direction_var, value="ascending").pack(anchor=tk.W)
+                tk.Radiobutton(direction_frame, text="Descending (Z-A)", variable=direction_var, value="descending").pack(anchor=tk.W)
+                
+                # Buttons
+                button_frame = tk.Frame(layer_dialog)
+                button_frame.pack(fill=tk.X, padx=10, pady=10)
+                
+                def add_layer():
+                    sort_type = sort_type_var.get()
+                    direction = direction_var.get()
+                    field = field_entry.get().strip() if sort_type == "field" else ""
+                    pattern = pattern_entry.get().strip() if sort_type == "custom" else ""
+                    custom_sort_by = custom_sort_by_var.get() if sort_type == "custom" else ""
+                    custom_field = custom_field_entry.get().strip() if sort_type == "custom" and custom_sort_by == "field" else ""
+                    
+                    if sort_type == "field" and not field:
+                        tk.messagebox.showerror("Field Required", "Please enter a field name for field sorting.")
+                        return
+                    
+                    if sort_type == "custom":
+                        if not pattern:
+                            tk.messagebox.showerror("Pattern Required", "Please enter a regex pattern for custom sorting.")
+                            return
+                        
+                        # Validate regex pattern
+                        try:
+                            import re
+                            re.compile(pattern)
+                        except re.error as e:
+                            tk.messagebox.showerror("Invalid Pattern", f"Invalid regex pattern: {str(e)}")
+                            return
+                        
+                        if custom_sort_by == "field" and not custom_field:
+                            tk.messagebox.showerror("Field Required", "Please enter a field name for custom field sorting.")
+                            return
+                    
+                    # Validate field exists if it's a field sort
+                    if sort_type == "field":
+                        has_field = False
+                        for value in current_data.values():
+                            field_value = get_nested_value(value, field)
+                            if field_value is not None:
+                                has_field = True
+                                break
+                        
+                        if not has_field:
+                            tk.messagebox.showerror("Field Not Found", f"Field '{field}' not found in any values.")
+                            return
+                    
+                    # Validate custom field exists if it's a custom field sort
+                    if sort_type == "custom" and custom_sort_by == "field":
+                        has_field = False
+                        for value in current_data.values():
+                            field_value = get_nested_value(value, custom_field)
+                            if field_value is not None:
+                                has_field = True
+                                break
+                        
+                        if not has_field:
+                            tk.messagebox.showerror("Field Not Found", f"Field '{custom_field}' not found in any values.")
+                            return
+                    
+                    # Add the layer
+                    sort_layers.append({
+                        'type': sort_type,
+                        'reverse': direction == "descending",
+                        'field': field,
+                        'pattern': pattern,
+                        'custom_sort_by': custom_sort_by,
+                        'custom_field': custom_field
+                    })
+                    
+                    update_layers_display()
+                    layer_dialog.destroy()
+                
+                tk.Button(button_frame, text="Add Layer", command=add_layer).pack(side=tk.LEFT, padx=5)
+                tk.Button(button_frame, text="Cancel", command=layer_dialog.destroy).pack(side=tk.LEFT, padx=5)
+            
+            def remove_sort_layer():
+                """Remove selected sort layer"""
+                selection = layers_listbox.curselection()
+                if not selection:
+                    tk.messagebox.showwarning("No Selection", "Please select a layer to remove.")
+                    return
+                
+                index = selection[0]
+                sort_layers.pop(index)
+                update_layers_display()
+            
+            def move_layer_up():
+                """Move selected layer up"""
+                selection = layers_listbox.curselection()
+                if not selection or selection[0] == 0:
+                    return
+                
+                index = selection[0]
+                sort_layers[index], sort_layers[index-1] = sort_layers[index-1], sort_layers[index]
+                update_layers_display()
+                layers_listbox.selection_set(index-1)
+            
+            def move_layer_down():
+                """Move selected layer down"""
+                selection = layers_listbox.curselection()
+                if not selection or selection[0] == len(sort_layers) - 1:
+                    return
+                
+                index = selection[0]
+                sort_layers[index], sort_layers[index+1] = sort_layers[index+1], sort_layers[index]
+                update_layers_display()
+                layers_listbox.selection_set(index+1)
+            
+            def apply_layered_sort():
+                """Apply all sort layers in order"""
+                if not sort_layers:
+                    tk.messagebox.showwarning("No Layers", "Please add at least one sort layer.")
+                    return
+                
+                try:
+                    # Start with the original data
+                    sorted_data = current_data.copy()
+                    
+                    # Apply each sort layer in reverse order (Python's sorted is stable)
+                    for layer in reversed(sort_layers):
+                        if layer['type'] == "key":
+                            sorted_data = dict(sorted(sorted_data.items(), 
+                                                   key=lambda item: str(item[0]).lower(),
+                                                   reverse=layer['reverse']))
+                        elif layer['type'] == "value":
+                            sorted_data = dict(sorted(sorted_data.items(), 
+                                                   key=lambda item: str(item[1]).lower(),
+                                                   reverse=layer['reverse']))
+                        elif layer['type'] == "field":
+                            def sort_key(item):
+                                field_value = get_nested_value(item[1], layer['field'])
+                                if field_value is None:
+                                    return (1, "")  # Put None values at the end
+                                return (0, str(field_value).lower())
+                            
+                            sorted_data = dict(sorted(sorted_data.items(), 
+                                                   key=sort_key,
+                                                   reverse=layer['reverse']))
+                        elif layer['type'] == "custom":
+                            import re
+                            pattern = layer['pattern']
+                            
+                            def custom_sort_key(item):
+                                # Determine what to sort based on custom_sort_by
+                                if layer['custom_sort_by'] == "key":
+                                    text_to_sort = str(item[0])
+                                elif layer['custom_sort_by'] == "value":
+                                    text_to_sort = str(item[1])
+                                elif layer['custom_sort_by'] == "field":
+                                    field_value = get_nested_value(item[1], layer['custom_field'])
+                                    if field_value is None:
+                                        return (1, "")  # Put None values at the end
+                                    text_to_sort = str(field_value)
+                                else:
+                                    text_to_sort = str(item[0])  # Default to key
+                                
+                                # Find matches for the pattern
+                                matches = re.findall(pattern, text_to_sort)
+                                if matches:
+                                    # Convert matches to sortable format
+                                    # For numbers, convert to int if possible
+                                    sort_values = []
+                                    for match in matches:
+                                        try:
+                                            # Try to convert to int for proper numeric sorting
+                                            sort_values.append(int(match))
+                                        except ValueError:
+                                            try:
+                                                # Try to convert to float
+                                                sort_values.append(float(match))
+                                            except ValueError:
+                                                # Keep as string
+                                                sort_values.append(match)
+                                    return (0, sort_values)
+                                else:
+                                    return (1, "")  # Put items without matches at the end
+                            
+                            sorted_data = dict(sorted(sorted_data.items(), 
+                                                   key=custom_sort_key,
+                                                   reverse=layer['reverse']))
+                    
+                    # Update the data
+                    self.data_sources[data_source]['data'] = sorted_data
+                    
+                    # Update tab text to show checkmark
+                    self.add_checkmark_to_tab(data_source)
+                    
+                    # Refresh the display
+                    refresh_display()
+                    
+                    # Close the dialog
+                    layered_sort_dialog.destroy()
+                    
+                    tk.messagebox.showinfo("Layered Sort Complete", 
+                                         f"Successfully applied {len(sort_layers)} sort layers to {len(sorted_data)} entries.")
+                    
+                except Exception as e:
+                    tk.messagebox.showerror("Sort Error", 
+                                          f"An error occurred while applying layered sort:\n{str(e)}")
+            
+            # Control buttons for layers
+            layer_controls = tk.Frame(layers_frame)
+            layer_controls.pack(fill=tk.X, pady=(0, 10))
+            
+            tk.Button(layer_controls, text="Add Layer", command=add_sort_layer).pack(side=tk.LEFT, padx=2)
+            tk.Button(layer_controls, text="Remove Layer", command=remove_sort_layer).pack(side=tk.LEFT, padx=2)
+            tk.Button(layer_controls, text="Move Up", command=move_layer_up).pack(side=tk.LEFT, padx=2)
+            tk.Button(layer_controls, text="Move Down", command=move_layer_down).pack(side=tk.LEFT, padx=2)
+            
+            # Main dialog buttons
+            main_buttons = tk.Frame(main_frame)
+            main_buttons.pack(fill=tk.X, pady=(10, 0))
+            
+            tk.Button(main_buttons, text="Apply Layered Sort", command=apply_layered_sort).pack(side=tk.LEFT, padx=5)
+            tk.Button(main_buttons, text="Cancel", command=layered_sort_dialog.destroy).pack(side=tk.LEFT, padx=5)
+
         def save_to_json():
             """Save the current data to a JSON file"""
             current_data = self.data_sources[data_source]['data']
@@ -4283,6 +4710,10 @@ class DatasheetGeneratorApp:
         # Add Sort Data button
         sort_button = tk.Button(button_frame, text="Sort Data", command=sort_data)
         sort_button.pack(side=tk.LEFT, padx=5)
+        
+        # Add Layered Sort Data button
+        layered_sort_button = tk.Button(button_frame, text="Layered Sort", command=layered_sort_data)
+        layered_sort_button.pack(side=tk.LEFT, padx=5)
         
         # Add Save to JSON button
         save_json_button = tk.Button(button_frame, text="Save to JSON", command=save_to_json)
@@ -4499,6 +4930,13 @@ class DatasheetGeneratorApp:
             datasheet_prefix = self.ds_str if hasattr(self, 'ds_str') else "Unknown"
             rows_per_sheet = self.rows_per_sheet if hasattr(self, 'rows_per_sheet') else "Unknown"
             
+            # Get statistics from the generation process
+            green_highlighted = 0
+            updated_cells = 0
+            if hasattr(self, 'generation_statistics') and self.generation_statistics:
+                green_highlighted = self.generation_statistics.get('green_highlighted_cells', 0)
+                updated_cells = self.generation_statistics.get('updated_cells', 0)
+            
             # Create the report message
             report_message = f"""Datasheet Generation Complete!
 
@@ -4507,6 +4945,10 @@ class DatasheetGeneratorApp:
 • Datasheet Prefix: {datasheet_prefix}
 • Sheets Created/Updated: {num_sheets}
 • Rows per Sheet: {rows_per_sheet}
+
+📈 Cell Processing Statistics:
+• Cells Highlighted Green: {green_highlighted}
+• Cells Updated: {updated_cells}
 
 ✅ Process completed successfully!
 The datasheets have been generated and are ready for use."""
@@ -4592,9 +5034,9 @@ The datasheets have been generated and are ready for use."""
     def browse_coordinate_value(self, entry):
         """Browse for coordinate value file"""
         filename = filedialog.askopenfilename(
-            filetypes=[("All supported files", "*.json;*.xlsx;*.xls"), 
+            filetypes=[("All supported files", "*.json;*.xlsx;*.xls;*.xlsm"), 
                       ("JSON files", "*.json"), 
-                      ("Excel files", "*.xlsx;*.xls"),
+                      ("Excel files", "*.xlsx;*.xls;*.xlsm"),
                       ("All files", "*.*")]
         )
         
@@ -4607,9 +5049,9 @@ The datasheets have been generated and are ready for use."""
         """Browse for datasheets file"""
         print("DEBUG: Starting browse_datasheets...")
         filename = filedialog.askopenfilename(
-            filetypes=[("All supported files", "*.json;*.xlsx;*.xls"), 
+            filetypes=[("All supported files", "*.json;*.xlsx;*.xls;*.xlsm"), 
                       ("JSON files", "*.json"), 
-                      ("Excel files", "*.xlsx;*.xls"),
+                      ("Excel files", "*.xlsx;*.xls;*.xlsm"),
                       ("All files", "*.*")]
         )
         
@@ -4633,9 +5075,9 @@ The datasheets have been generated and are ready for use."""
     def browse_data_source(self, entry, data_source):
         """Browse for a file for a specific data source"""
         filename = filedialog.askopenfilename(
-            filetypes=[("All supported files", "*.json;*.xlsx;*.xls"), 
+            filetypes=[("All supported files", "*.json;*.xlsx;*.xls;*.xlsm"), 
                       ("JSON files", "*.json"), 
-                      ("Excel files", "*.xlsx;*.xls"),
+                      ("Excel files", "*.xlsx;*.xls;*.xlsm"),
                       ("All files", "*.*")]
         )
         
@@ -5446,6 +5888,7 @@ The datasheets have been generated and are ready for use."""
     def open_excel_regex_search_app(self):
         """Opens the Excel Regex Search window."""
         regex_window = tk.Toplevel(self.root)
+        center_window_over_parent(regex_window)
         ExcelRegexSearchApp(regex_window)
     
     def open_semantic_matcher(self):

@@ -274,18 +274,54 @@ class ThermowellConfigurator(tk.Tk):
                 ("AA - 1-in. Class 150", "AA"),
                 ("AB - 1 1/2-in. Class 150", "AB"),
                 ("AC - 2-in. Class 150", "AC"),
+                ("AD - 3-in. Class 150", "AD"),
+                ("AE - 4-in. Class 150", "AE"),
+                ("AF - 6-in. Class 150", "AF"),
+                ("AG - 3/4-in. Class 300", "AG"),
                 ("AH - 1-in. Class 300", "AH"),
                 ("AJ - 1 1/2-in. Class 300", "AJ"),
-                ("AK - 2-in. Class 300", "AK")
+                ("AK - 2-in. Class 300", "AK"),
+                ("AL - 1-in. Class 400/600", "AL"),
+                ("AM - 1 1/2-in. Class 400/600", "AM"),
+                ("AN - 2-in. Class 400/600", "AN"),
+                ("AP - 1-in. Class 900/1500", "AP"),
+                ("AQ - 1 1/2-in. Class 900/1500", "AQ"),
+                ("AR - 2-in. Class 900/1500", "AR"),
+                ("AS - 1-in. Class 2500", "AS"),
+                ("AT - 1 1/2-in. Class 2500", "AT"),
+                ("AU - 2-in. Class 2500", "AU"),
+                ("AV - 3-in. Class 300", "AV"),
+                ("AW - 3-in. Class 400/600", "AW"),
+                ("AX - 3-in. Class 900", "AX"),
+                ("AY - 3-in. Class 1500", "AY"),
+                ("AZ - 3-in. Class 2500", "AZ")
             ]
         elif mounting_val == "V":
             options = [
                 ("AA - 1-in. Class 150", "AA"),
                 ("AB - 1 1/2-in. Class 150", "AB"),
                 ("AC - 2-in. Class 150", "AC"),
+                ("AD - 3-in. Class 150", "AD"),
+                ("AE - 4-in. Class 150", "AE"),
+                ("AF - 6-in. Class 150", "AF"),
+                ("AG - 3/4-in. Class 300", "AG"),
                 ("AH - 1-in. Class 300", "AH"),
                 ("AJ - 1 1/2-in. Class 300", "AJ"),
-                ("AK - 2-in. Class 300", "AK")
+                ("AK - 2-in. Class 300", "AK"),
+                ("AL - 1-in. Class 400/600", "AL"),
+                ("AM - 1 1/2-in. Class 400/600", "AM"),
+                ("AN - 2-in. Class 400/600", "AN"),
+                ("AP - 1-in. Class 900/1500", "AP"),
+                ("AQ - 1 1/2-in. Class 900/1500", "AQ"),
+                ("AR - 2-in. Class 900/1500", "AR"),
+                ("AS - 1-in. Class 2500", "AS"),
+                ("AT - 1 1/2-in. Class 2500", "AT"),
+                ("AU - 2-in. Class 2500", "AU"),
+                ("AV - 3-in. Class 300", "AV"),
+                ("AW - 3-in. Class 400/600", "AW"),
+                ("AX - 3-in. Class 900", "AX"),
+                ("AY - 3-in. Class 1500", "AY"),
+                ("AZ - 3-in. Class 2500", "AZ")
             ]
         elif mounting_val in ["W", "D"]:
             options = [

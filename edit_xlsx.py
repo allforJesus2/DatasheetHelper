@@ -421,7 +421,7 @@ class ExcelEditorApp:
             elif selection == "FILES":
                 file_paths = filedialog.askopenfilenames(
                     title="Select Excel files",
-                    filetypes=[("Excel files", "*.xlsx")]
+                    filetypes=[("Excel files", "*.xlsx *.xlsm")]
                 )
                 if file_paths:
                     for file_path in file_paths:
