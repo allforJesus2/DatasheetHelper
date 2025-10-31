@@ -1,7 +1,7 @@
 import openpyxl
 import xlwings as xw
 import json
-from tkinter import messagebox, Toplevel, Listbox, Button, Frame, MULTIPLE, Checkbutton, IntVar, Label, Scrollbar, Canvas, Entry, Spinbox, END, BOTH, LEFT, RIGHT, TOP, BOTTOM, X, Y, W, E, NW, SE, EW
+from tkinter import messagebox, Toplevel, Listbox, Button, Frame, MULTIPLE, Checkbutton, IntVar, Label, Scrollbar, Canvas, Entry, Spinbox, END, BOTH, LEFT, RIGHT, TOP, BOTTOM, X, Y, W, E, NW, SE, EW, scrolledtext
 from math import log10, floor
 import tkinter as tk
 
@@ -397,6 +397,36 @@ def get_unique_sheet_name(datasheet, ds_prefix, sheet_number):
 
     return name
 
+def get_unique_sheet_name_from_tag(datasheet, tag):
+    """Generate unique sheet name using tag name, incrementing suffix if needed"""
+    # Use tag name as base name, but ensure it's valid for Excel sheet names
+    base_name = str(tag)
+    
+    # Excel sheet name restrictions: max 31 chars, no special characters
+    invalid_chars = ['\\', '/', '*', '?', ':', '[', ']']
+    for char in invalid_chars:
+        base_name = base_name.replace(char, '_')
+    
+    # Truncate if too long (Excel limit is 31 characters)
+    if len(base_name) > 31:
+        base_name = base_name[:31]
+    
+    name = base_name
+    suffix = 1
+
+    while name in datasheet.sheets:
+        # Add suffix, ensuring we don't exceed 31 character limit
+        suffix_str = f"_{suffix}"
+        if len(base_name) + len(suffix_str) > 31:
+            # Truncate base name to make room for suffix
+            truncated_base = base_name[:31 - len(suffix_str)]
+            name = f"{truncated_base}{suffix_str}"
+        else:
+            name = f"{base_name}{suffix_str}"
+        suffix += 1
+
+    return name
+
 def apply_character_coloring(sheet, cell_address, old_text, new_text):
     """Apply character-level color coding to show changes using difflib"""
     try:
@@ -570,6 +600,13 @@ def update_cell_xlwings(sheet, cell_address, value, cell_update_option=None):
             # Current method - append with new line and color old green, new red
             apply_append_coloring(sheet, cell_address, current_value, value)
             
+        elif cell_update_option == "new_red_and_highlight":
+            # Character-level color coding with yellow background highlighting for modified data
+            cell.value = value_str
+            apply_character_coloring(sheet, cell_address, current_value_str, value_str)
+            # Apply yellow background highlighting since data was modified
+            apply_yellow_highlighting(sheet, cell_address)
+            
         else:
             # No color coding - just update the value in black
             cell.value = value_str
@@ -598,6 +635,25 @@ def apply_green_highlighting(sheet, cell_address):
         
     except Exception as e:
         print(f"Error applying green highlighting to {cell_address}: {e}")
+
+def apply_yellow_highlighting(sheet, cell_address):
+    """Apply yellow background highlighting to a cell"""
+    try:
+        # Get the cell
+        cell = sheet.range(cell_address)
+        
+        # Check if cell is part of a merged range
+        if cell.api.MergeCells:
+            # Get the merged range address
+            merged_range_address = cell.api.MergeArea.Address
+            # Use the top-left cell of the merged range
+            cell = sheet.range(merged_range_address.split(':')[0])
+        
+        # Apply yellow background color
+        cell.color = (255, 255, 0)  # Yellow (RGB)
+        
+    except Exception as e:
+        print(f"Error applying yellow highlighting to {cell_address}: {e}")
 
 
 def create_or_get_sheet(datasheet, sheet_name, source_sheet=None, make_visible=True):
@@ -712,7 +768,7 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
         (Other args are the same as before)
     """
     # Initialize statistics counters
-    stats = {'green_highlighted_cells': 0, 'updated_cells': 0, 'added_tags': 0}
+    stats = {'green_highlighted_cells': 0, 'updated_cells': 0, 'added_tags': 0, 'duplicate_tags': []}
     added_sheets = set()
 
     # Get source sheet object, if available
@@ -726,8 +782,8 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
     # --- 1. Find all existing tags and their locations ---
     existing_tags = []
     for sheet in datasheet.sheets:
-        if sheet.name == source_sheet_name:
-            continue
+        #if sheet.name == source_sheet_name:
+        #    continue
         if sheet.name.startswith(ds_prefix) or ds_prefix == '':
             for i in range(rows_per_sheet):
                 offset_coord = increment_cell_reference(key_coordinate, i)
@@ -736,6 +792,27 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                     existing_tags.append({'value': tag_value, 'sheet': sheet.name, 'coord': offset_coord})
     
     print(f"Found {len(existing_tags)} existing tags in the datasheet.")
+
+    # --- Detect duplicate existing tags ---
+    tag_occurrences = {}
+    for et in existing_tags:
+        tag_value = str(et['value'])
+        if tag_value not in tag_occurrences:
+            tag_occurrences[tag_value] = []
+        tag_occurrences[tag_value].append(et)
+    
+    # Find tags that appear more than once
+    duplicate_tags_list = []
+    for tag_value, occurrences in tag_occurrences.items():
+        if len(occurrences) > 1:
+            duplicate_tags_list.append({
+                'tag': tag_value,
+                'occurrences': occurrences
+            })
+    
+    if duplicate_tags_list:
+        stats['duplicate_tags'] = duplicate_tags_list
+        print(f"Found {len(duplicate_tags_list)} duplicate tag(s) in existing datasheets.")
 
     # Helper for matching tags
     def matches_tag(cell_value, tag, partial=False):
@@ -839,8 +916,13 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                 slot_in_new_sheets = i
                 if slot_in_new_sheets % rows_per_sheet == 0:
                     new_sheet_count += 1
-                    sheet_num = last_sheet_num + new_sheet_count
-                    sheet_name = get_unique_sheet_name(datasheet, ds_prefix, sheet_num)
+                    
+                    # Use tag name as sheet name when rows_per_sheet = 1, otherwise use prefix + number
+                    if rows_per_sheet == 1:
+                        sheet_name = get_unique_sheet_name_from_tag(datasheet, tag)
+                    else:
+                        sheet_num = last_sheet_num + new_sheet_count
+                        sheet_name = get_unique_sheet_name(datasheet, ds_prefix, sheet_num)
                     
                     target_sheet = create_or_get_sheet(datasheet, sheet_name, source_sheet)
                     added_sheets.add(sheet_name)
@@ -1180,5 +1262,64 @@ def ask_combobox(title, prompt, options=None, parent=None, initialvalue=""):
         dialog.wait_window()
     
     return result[0]
+
+def show_duplicate_tags_dialog(parent, duplicate_tags_list):
+    """
+    Display a dialog showing duplicate tags found in existing datasheets.
+    
+    Args:
+        parent: Parent tkinter window
+        duplicate_tags_list: List of dictionaries with 'tag' and 'occurrences' keys
+                            Each occurrence has 'sheet', 'coord', and 'value' keys
+    """
+    if not duplicate_tags_list:
+        return
+    
+    dialog = Toplevel(parent)
+    dialog.title("Duplicate Tags Found")
+    dialog.geometry("600x500")
+    dialog.transient(parent)
+    dialog.grab_set()
+    
+    # Header label
+    header_label = Label(dialog, text=f"Found {len(duplicate_tags_list)} duplicate tag(s) in existing datasheets:", 
+                        font=("Arial", 10, "bold"))
+    header_label.pack(padx=10, pady=(10, 5))
+    
+    # Create scrollable log text area
+    log_text = scrolledtext.ScrolledText(dialog, wrap="word", width=70, height=20)
+    log_text.pack(fill=BOTH, expand=True, padx=10, pady=5)
+    
+    # Populate log with duplicate information
+    log_text.insert(END, "DUPLICATE TAGS LOG\n")
+    log_text.insert(END, "=" * 70 + "\n\n")
+    
+    for idx, dup_info in enumerate(duplicate_tags_list, 1):
+        tag = dup_info['tag']
+        occurrences = dup_info['occurrences']
+        
+        log_text.insert(END, f"{idx}. Tag: {tag}\n")
+        log_text.insert(END, f"   Found {len(occurrences)} occurrence(s):\n")
+        
+        for occ in occurrences:
+            sheet = occ['sheet']
+            coord = occ['coord']
+            log_text.insert(END, f"      - Sheet: {sheet}, Coordinate: {coord}\n")
+        
+        log_text.insert(END, "\n")
+    
+    log_text.config(state="disabled")  # Make read-only
+    
+    # Close button
+    button_frame = Frame(dialog)
+    button_frame.pack(fill=X, padx=10, pady=(5, 10))
+    
+    Button(button_frame, text="Close", command=dialog.destroy, width=15).pack()
+    
+    # Center over parent
+    if parent:
+        center_window_over_parent(dialog)
+    
+    dialog.wait_window()
 
 # endregion

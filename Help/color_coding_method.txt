@@ -7,6 +7,7 @@ Options:
 1. "None (Black)" - All text appears in black, no color coding
 2. "new_red_old_green" - Newer data in red, older data in green
 3. "new_red" - Only newer data highlighted in red, rest in black
+4. "new_red_and_highlight" - Newer data in red with yellow background highlighting for modified cells
 
 Usage:
 - Select from the dropdown menu
@@ -17,10 +18,11 @@ When to Use Each Option:
 - None (Black): When color coding is not needed or for formal documentation
 - new_red_old_green: When comparing two versions and want both highlighted
 - new_red: When you want to emphasize only the newest changes
+- new_red_and_highlight: When you want to emphasize newest changes AND highlight modified cells with yellow background
 
 Tips:
-- Color coding does not affect cell background, only text color
-- Ensure your organization's documentation standards allow colored text
+- Color coding affects both text color and cell background (for new_red_and_highlight option)
+- Ensure your organization's documentation standards allow colored text and backgrounds
 - Colors are applied during the data writing process
 - If printing, consider that colors may not reproduce well in grayscale
 

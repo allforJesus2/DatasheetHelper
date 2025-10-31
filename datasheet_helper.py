@@ -548,6 +548,55 @@ class DatasheetGeneratorApp:
             name = primary_data_source
             print(f"Primary data source changed to: {name} ({primary_data_source})")
     
+    def select_data_source_tab(self, data_source_name):
+        """Select the tab for the given data source name if it exists"""
+        if not hasattr(self, 'data_sources_notebook'):
+            return
+        try:
+            for tab_id in self.data_sources_notebook.tabs():
+                tab_text = self.data_sources_notebook.tab(tab_id, "text")
+                normalized_text = tab_text.replace(" ✓", "").strip()
+                if normalized_text == data_source_name:
+                    self.data_sources_notebook.select(tab_id)
+                    break
+        except Exception as e:
+            print(f"Error selecting data source tab '{data_source_name}': {e}")
+    
+    def open_data_source_switcher(self):
+        """Open a dialog listing all datasources; selecting one switches to that tab"""
+        dialog = Toplevel(self.root)
+        dialog.title("Datasources")
+        dialog.geometry("300x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Listbox with all data sources
+        listbox = tk.Listbox(dialog)
+        for name in self.get_all_data_sources():
+            listbox.insert(END, name)
+        listbox.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        listbox.focus_set()
+        
+        def on_select(event=None):
+            selection = listbox.curselection()
+            if selection:
+                name = listbox.get(selection[0])
+                self.select_data_source_tab(name)
+                dialog.destroy()
+        
+        # Double-click selects
+        listbox.bind("<Double-Button-1>", on_select)
+        listbox.bind('<Return>', on_select)
+        
+        # Buttons
+        btn_frame = Frame(dialog)
+        btn_frame.pack(fill=X, padx=10, pady=(0, 10))
+        ttk.Button(btn_frame, text="Open", command=on_select, width=10).pack(side=RIGHT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=10).pack(side=RIGHT, padx=5)
+        
+        # Center over parent
+        center_window_over_parent(dialog)
+    
     def add_data_source_from_entry(self, event=None):
         """Add a new data source from the text entry box"""
         data_source_id = self.add_data_source_entry.get().strip()
@@ -725,6 +774,11 @@ class DatasheetGeneratorApp:
         clear_search_btn = ttk.Button(search_frame, text="✕", width=3, 
                                      command=self.clear_data_source_search)
         clear_search_btn.pack(side="left")
+        
+        # Button to open a list of datasources and switch tabs
+        switch_btn = ttk.Button(search_frame, text="Switch…", width=9, 
+                                command=self.open_data_source_switcher)
+        switch_btn.pack(side="left", padx=(5, 0))
         
         # Add text entry and button to create new data source
         add_data_source_frame = ttk.Frame(sources_frame)
@@ -1700,7 +1754,7 @@ class DatasheetGeneratorApp:
 
         self.color_coding_var = tk.StringVar(value="new_red_old_green")
         color_dropdown = ttk.Combobox(color_frame, textvariable=self.color_coding_var, 
-                                     values=["None (Black)", "new_red_old_green", "new_red"], 
+                                     values=["None (Black)", "new_red_old_green", "new_red", "new_red_and_highlight"], 
                                      state="readonly", width=20)
         color_dropdown.pack(side=tk.LEFT, padx=5)
 
@@ -1708,7 +1762,7 @@ class DatasheetGeneratorApp:
         fill_mode_frame = tk.Frame(right_section)
         fill_mode_frame.pack(fill=tk.X, pady=5)
 
-        fill_mode_label = tk.Label(fill_mode_frame, text="Fill Mode:", width=20)
+        fill_mode_label = tk.Label(fill_mode_frame, text="New Tags Sheet Fill Mode:", width=20)
         fill_mode_label.pack(side=tk.LEFT, padx=(0, 5))
 
         self.fill_mode_var = tk.StringVar(value="continue_last")
@@ -1810,15 +1864,16 @@ class DatasheetGeneratorApp:
                 update_listboxes()
 
         def remove_coordinate(data_source, listbox):
-            selected = listbox.curselection()
-            if selected:
-                idx = selected[0]
-                coord = listbox.get(idx).split(':')[0]
-                coordinate_values = self.data_sources[data_source]['coordinate_values']
+            selected_indices = listbox.curselection()
+            if not selected_indices:
+                return
+            coordinate_values = self.data_sources[data_source]['coordinate_values']
+            for idx in reversed(selected_indices):
+                coord = listbox.get(idx).split(':')[0].strip()
                 if coord in coordinate_values:
                     del coordinate_values[coord]
-                    self.data_sources[data_source]['coordinate_values'] = coordinate_values
-                update_listboxes()
+            self.data_sources[data_source]['coordinate_values'] = coordinate_values
+            update_listboxes()
 
         def clear_coordinates(data_source, listbox):
             self.data_sources[data_source]['coordinate_values'] = {}
@@ -2092,8 +2147,8 @@ class DatasheetGeneratorApp:
             btn_frame = ttk.Frame(data_frame)
             btn_frame.pack(fill="x", padx=5)
 
-            # Listbox
-            listbox = tk.Listbox(data_frame, height=8)
+            # Listbox (enable multi-select and preserve selection on focus change)
+            listbox = tk.Listbox(data_frame, height=8, selectmode=tk.EXTENDED, exportselection=False)
             listbox.pack(fill="both", expand=True, padx=5, pady=5)
             
             # Store listbox reference
@@ -2347,25 +2402,33 @@ class DatasheetGeneratorApp:
             self.coord_context_menu.add_command(label="Combine", command=self.open_combination_dialog)
             self.coord_context_menu.add_command(label="Remove Combination", command=self.remove_combination)
             self.coord_context_menu.add_separator()
+            # Remove selected coordinates (multi-delete)
+            self.coord_context_menu.add_command(label="Remove Selected", command=lambda: remove_coordinate(self.current_data_source_for_context, self.current_listbox_for_context))
+            self.coord_context_menu.add_separator()
             self.coord_context_menu.add_command(label="Cancel")
 
         if not hasattr(self, 'selected_coord_for_context'):
             self.selected_coord_for_context = None
         if not hasattr(self, 'current_data_source_for_context'):
             self.current_data_source_for_context = None
+        if not hasattr(self, 'current_listbox_for_context'):
+            self.current_listbox_for_context = None
 
         def show_coord_context_menu(event, listbox_widget, data_source):
-            # Select the item under the cursor
+            # Select behavior: keep multi-selection if right-clicked item is within it; otherwise select the clicked item
             clicked_index = listbox_widget.nearest(event.y)
-            listbox_widget.selection_clear(0, tk.END)
-            listbox_widget.selection_set(clicked_index)
-            listbox_widget.activate(clicked_index)
+            current_selection = set(listbox_widget.curselection())
+            if clicked_index not in current_selection:
+                listbox_widget.selection_clear(0, tk.END)
+                listbox_widget.selection_set(clicked_index)
+                listbox_widget.activate(clicked_index)
 
             selected_text = listbox_widget.get(clicked_index)
             # Extract coordinate (part before ':')
             self.selected_coord_for_context = selected_text.split(':')[0].strip()
-            # Store the current data source for context menu actions
+            # Store the current data source and listbox for context menu actions
             self.current_data_source_for_context = data_source
+            self.current_listbox_for_context = listbox_widget
 
             # Check if conversion exists and enable/disable "Remove Conversion"
             if self.selected_coord_for_context in self.data_sources[data_source]['coordinate_conversions']:
@@ -2378,6 +2441,15 @@ class DatasheetGeneratorApp:
                 self.coord_context_menu.entryconfig("Remove Combination", state="normal")
             else:
                 self.coord_context_menu.entryconfig("Remove Combination", state="disabled")
+
+            # Enable/disable multi-remove based on selection count
+            try:
+                if listbox_widget.curselection():
+                    self.coord_context_menu.entryconfig("Remove Selected", state="normal")
+                else:
+                    self.coord_context_menu.entryconfig("Remove Selected", state="disabled")
+            except Exception:
+                pass
 
             # Popup the menu
             try:
@@ -3116,6 +3188,25 @@ class DatasheetGeneratorApp:
             messagebox.showerror("Missing Required Fields", error_message)
             return  # Cancel the operation
         
+        # VALIDATION: Check if source sheet exists in the workbook
+        if primary_source_sheet_name and primary_source_sheet_name.strip():
+            try:
+                # Get available sheet names from the destination workbook
+                available_sheets = self.get_sheet_names()
+                if primary_source_sheet_name not in available_sheets:
+                    self.update_status("Source sheet not found", "red")
+                    error_message = f"The source sheet '{primary_source_sheet_name}' does not exist in the workbook.\n\n"
+                    error_message += f"Available sheets are:\n"
+                    error_message += "\n".join(f"• {sheet}" for sheet in available_sheets)
+                    error_message += f"\n\nPlease select a valid source sheet name before proceeding.\n\nThe Add/Update operation has been cancelled."
+                    messagebox.showerror("Source Sheet Not Found", error_message)
+                    return  # Cancel the operation
+            except Exception as e:
+                self.update_status("Error validating source sheet", "red")
+                error_message = f"Error validating source sheet '{primary_source_sheet_name}': {str(e)}\n\nThe Add/Update operation has been cancelled."
+                messagebox.showerror("Validation Error", error_message)
+                return  # Cancel the operation
+        
         self.assign_value_coordinate_to_tag()
         print("Adding/Updating Datasheets")
         self.update_status("Adding/Updating Datasheets...", "blue")
@@ -3184,9 +3275,10 @@ class DatasheetGeneratorApp:
             # Check if rows_per_sheet = 1 and any tag matches source sheet name
             if self.rows_per_sheet == 1 and primary_source_sheet_name and primary_source_sheet_name in self.tag_cell_values:
                 warning_messages.append(
-                    f"🚨 CRITICAL: Tag name '{primary_source_sheet_name}' matches source sheet name!\n"
-                    f"   With rows_per_sheet=1, this will DELETE your source template!\n"
-                    f"   Either:\n"
+                    f"⚠️ INFO: Tag name '{primary_source_sheet_name}' matches source sheet name.\n"
+                    f"   With rows_per_sheet=1, this will USE your existing source sheet directly.\n"
+                    f"   Your source template will be preserved and used as-is.\n"
+                    f"   If you prefer separate sheets, consider:\n"
                     f"   • Rename your source sheet to something unique (e.g., '_Template', 'Source_Template')\n"
                     f"   • Remove the tag '{primary_source_sheet_name}' from your data\n"
                     f"   • Change rows_per_sheet to a value > 1"
@@ -3235,6 +3327,11 @@ class DatasheetGeneratorApp:
             else:
                 print("DONE")
                 self.update_status("Process completed successfully", "green")
+                
+                # Check for duplicate tags and show alert if found
+                if self.generation_statistics.get('duplicate_tags'):
+                    from main_functions import show_duplicate_tags_dialog
+                    show_duplicate_tags_dialog(self.root, self.generation_statistics['duplicate_tags'])
                 
                 # Generate and show detailed report
                 self.show_generation_report()
@@ -4273,7 +4370,7 @@ class DatasheetGeneratorApp:
             center_window_over_parent(layered_sort_dialog)
             
             dialog_width = 600
-            dialog_height = 500
+            dialog_height = 600
             layered_sort_dialog.geometry(f"{dialog_width}x{dialog_height}")
             
             # Main frame

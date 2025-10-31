@@ -1,7 +1,33 @@
 {
-    "file_path": "S:/Projects/24317_Electra_CO_EPCM/Engineering/MechPiping/SpecsDataSheets/11551 P&F HXs/SPEC-ME-11551 Plate and Frame Heat Exchangers Rev 0.xlsx",
-    "init_tag_coord": "e8",
-    "init_coords_to_fields": "{'E8': 'Equipment No.', 'F8': 'Application', 'G8': 'Description of Operating Conditions', 'H8': 'Heat Exchanged, Btu/h', 'M8': 'hot_water_design__Design Mass Flow Rate, lb/h', 'O8': 'hot_water_design__Design Flow Rate, gpm', 'P8': 'hot_water_design__NPS, In', 'Q8': 'hot_water_design__NPS, Out', 'R8': 'hot_water_design__Flg. class', 'S8': 'hot_water_design__ID, in.', 'T8': 'hot_water_design__Vel, ft/s', 'U8': 'hot_water_design__Inlet connection', 'V8': 'hot_water_design__Outlet connection', 'W8': 'hot_water_design__Fluid density, lb/ft3', 'Y8': 'hot_water_design__Specific gravity', 'Z8': 'hot_water_design__Design pressure, psig', 'AA8': 'hot_water_design__Design temperature, \u00b0F', 'AB8': 'hot_water_oper_Inlet pressure, psig', 'AC8': 'hot_water_oper_Temperature entering, \u00b0F', 'AD8': 'hot_water_oper_Temperature leaving, \u00b0F', 'AE8': 'hot_water_oper_Heat Duty, (Btu/h)', 'AF8': 'hot_water_oper_Viscosity, lb-s/ft2', 'AG8': 'hot_water_oper_Specific heat, Btu/(lb-\u00b0F)', 'AH8': 'hot_water_oper_Thermal cond, Btu / (h-ft-\u00b0F)', 'AI8': 'hot_water_oper_Solids concentration, wt%', 'AJ8': 'hot_water_oper_Avg. particle size (d50), \u03bcm', 'AK8': 'hot_water_oper_Allowable press. drop, psi', 'AQ8': 'iron_solution_Design Mass Flow Rate, lb/h', 'AS8': 'iron_solution_Design Flow Rate, gpm', 'AT8': 'iron_solution_NPS, In', 'AU8': 'iron_solution_NPS, Out', 'AV8': 'iron_solution_Flg. class', 'AW8': 'iron_solution_ID, in.', 'AX8': 'iron_solution_Vel, ft/s', 'AY8': 'iron_solution_Inlet connection', 'AZ8': 'iron_solution_Outlet connection', 'BA8': 'iron_solution_Fluid density, lb/ft3', 'BC8': 'iron_solution_Specific gravity', 'BF8': 'iron_solution_oper_Inlet pressure, psig', 'BG8': 'iron_solution_oper_Temperature entering, \u00b0F', 'BH8': 'iron_solution_oper_Temperature leaving, \u00b0F', 'BI8': 'iron_solution_oper_Heat Duty, (Btu/h)', 'BJ8': 'iron_solution_oper_Viscosity, cP', 'BK8': 'iron_solution_oper_Specific heat, Btu/(lb-\u00b0F)', 'BL8': 'iron_solution_oper_Thermal cond, Btu / (h-ft-\u00b0F)', 'BM8': 'iron_solution_oper_Solids concentration, wt%', 'BN8': 'iron_solution_oper_Avg. particle size (d50), \u03bcm', 'BO8': 'iron_solution_oper_Allow. press. drop, psi'}",
-    "tags_per_sheet": "16",
-    "selected_sheets": []
+    "file_path": "S:/Projects/24317_Electra_CO_EPCM/Engineering/Instrumentation/DataSheets/SPEC-IC-PRG-1 Pressure Regulating Valve Rev. A KAM Check.xlsx",
+    "init_tag_coord": "g12",
+    "init_coords_to_fields": "{'G12': 'TAG NUMBER', 'G13': 'SERVICE', 'G14': 'P&ID', 'G54': 'INLET PRESSURE P1 (kPag)_Q MAX', 'H54': 'INLET PRESSURE P1 (kPag)_Q NORM', 'K54': 'INLET PRESSURE P1 (kPag)_Q MIN', 'G55': 'OUTLET PRESSURE P2 (kPag)_Q MAX', 'H55': 'OUTLET PRESSURE P2 (kPag)_Q NORM', 'K55': 'OUTLET PRESSURE P2 (kPag)_Q MIN', 'G56': 'TEMPERATURE (\u00b0C)_Q MAX', 'H56': 'TEMPERATURE (\u00b0C)_Q NORM', 'K56': 'TEMPERATURE (\u00b0C)_Q MIN', 'G57': 'Q = LIQUID FLOW RATE (L/min)_Q MAX', 'H57': 'Q = LIQUID FLOW RATE (L/min)_Q NORM', 'K57': 'Q = LIQUID FLOW RATE (L/min)_Q MIN', 'U51': 'CRITICAL PRESSURE (kPaa)', 'U52': 'CRITICAL TEMPERATURE (\u00b0C)', 'U53': 'KINEMATIC VISCOSITY (cSt)', 'U54': 'COMPRESSIBILITY FACTOR (Z)', 'U55': 'SPECIFIC GRAVITY [LIQUID]', 'U56': 'VALVE MAX CV [LIQUID]', 'G58': 'DENSITY (kg/m\u00b3)', 'G59': 'VAPOR PRESSURE [LIQUID] (psia)', 'G60': 'MOLECULAR WEIGHT [GAS]'}",
+    "tags_per_sheet": "1",
+    "selected_sheets": [
+        "PCV-1015",
+        "PCV-1025",
+        "PCV-1035",
+        "PCV-1020",
+        "PCV-1023",
+        "PCV-1030",
+        "PCV-1061A",
+        "PCV-1061B",
+        "PCV-1067",
+        "PCV-1071",
+        "PCV-1206",
+        "PCV-1216A",
+        "PCV-1216B",
+        "PCV-1219",
+        "PCV-1221",
+        "PCV-1227A",
+        "PCV-1231",
+        "PCV-1284",
+        "PCV-1411",
+        "PCV-1607",
+        "PCV-1626",
+        "PCV-3100",
+        "PCV-1631",
+        "PCV-1646",
+        "PCV-1629"
+    ]
 }

@@ -15,8 +15,11 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
 
      This function loads an Excel workbook from the given file path and iterates through its worksheets,
      extracting data based on initial coordinates and mappings between coordinates and field names.
-     It returns a dictionary where keys are tags (e.g., sheet names) and values are dictionaries containing
-     field names as keys and their corresponding cell values as values.
+     It returns a tuple containing:
+     1. A dictionary where keys are tags (e.g., sheet names) and values are dictionaries containing
+        field names as keys and their corresponding cell values as values. Duplicate tags are automatically
+        renamed with suffixes (e.g., tag_2, tag_3).
+     2. A list of dictionaries containing information about duplicate tags found during extraction.
      
      Args:
          file_path: Path to the Excel file
@@ -24,12 +27,22 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
          init_coords_to_fields: Dictionary mapping coordinates to field names
          tags_per_sheet: Number of tags to extract per sheet
          selected_sheets: List of sheet names to process (if None, processes all sheets)
+     
+     Returns:
+         tuple: (all_tag_data, duplicate_tags_info) where:
+             - all_tag_data: Dictionary of extracted data keyed by tag names
+             - duplicate_tags_info: List of dicts with keys 'tag', 'sheet', 'coordinate', 'occurrence'
      """
     # Load the workbook
+    print(f"Loading workbook from {file_path}")
     wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-
+    print(f"Workbook loaded successfully")
     # Initialize an empty dictionary to store the extracted data
     all_tag_data = {}
+    # Track duplicate tags to append suffixes
+    duplicate_counts = {}
+    # Track duplicate tag information for reporting
+    duplicate_tags_info = []
 
     # If no specific sheets are selected, process all sheets
     if selected_sheets is None:
@@ -43,6 +56,14 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
         # Iterate over each coordinate-field name pair
         for i in range(tags_per_sheet):
             tag = ws[tag_coord].value
+            
+            # Skip if tag is None or empty (empty cell)
+            if tag is None:
+                # increment the coords and tag for next iteration
+                coords_to_fields = increment_coords_to_fields(coords_to_fields)
+                tag_coord = increment_coord(tag_coord)
+                continue
+            
             tag_data = {}
             for coord, field_name in coords_to_fields.items():
                 # Extract the value from the specified cell
@@ -50,14 +71,42 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
                 # Add the field name and its corresponding value to the extracted_data dictionary
                 tag_data[field_name] = cell_value
 
+            # Handle duplicate tags by appending a suffix
+            if tag in all_tag_data:
+                if tag not in duplicate_counts:
+                    duplicate_counts[tag] = 1
+                duplicate_counts[tag] += 1
+                unique_tag = f"{tag}_{duplicate_counts[tag]}"
+                # Log duplicate occurrence
+                duplicate_tags_info.append({
+                    'tag': tag,
+                    'sheet': ws.title,
+                    'coordinate': tag_coord,
+                    'occurrence': duplicate_counts[tag]
+                })
+                print(f"Duplicate tag found: '{tag}' in sheet '{ws.title}' at {tag_coord} (renamed to '{unique_tag}')")
+            else:
+                unique_tag = tag
+            
             # add tag to all tag data
-            all_tag_data[tag] = tag_data
+            all_tag_data[unique_tag] = tag_data
             # increment the coords and tag
             coords_to_fields = increment_coords_to_fields(coords_to_fields)
             tag_coord = increment_coord(tag_coord)
 
-    # Return the dictionary of extracted data
-    return all_tag_data
+    # Log summary of duplicates if any were found
+    if duplicate_tags_info:
+        unique_duplicate_tags = set(info['tag'] for info in duplicate_tags_info)
+        print(f"\nDuplicate Tag Summary:")
+        print(f"Found {len(unique_duplicate_tags)} unique tag(s) with duplicates:")
+        for tag in unique_duplicate_tags:
+            occurrences = [info for info in duplicate_tags_info if info['tag'] == tag]
+            print(f"  - Tag '{tag}': {len(occurrences) + 1} total occurrences (1 original + {len(occurrences)} duplicates)")
+            for occ in occurrences:
+                print(f"    - Duplicate in sheet '{occ['sheet']}' at {occ['coordinate']} (renamed to '{tag}_{occ['occurrence']}')")
+
+    # Return the dictionary of extracted data and duplicate information
+    return all_tag_data, duplicate_tags_info
 
 
 def increment_coords_to_fields(coords_to_fields):
@@ -254,9 +303,32 @@ class DatasheetExtractor:
             selected_sheets = self.all_sheets
 
         try:
-            result = extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet, selected_sheets)
+            result, duplicate_tags_info = extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_fields, tags_per_sheet, selected_sheets)
             
-            messagebox.showinfo("Result", "Data extraction completed successfully.")
+            # Show message about duplicates if any were found
+            if duplicate_tags_info:
+                unique_duplicate_tags = set(info['tag'] for info in duplicate_tags_info)
+                duplicate_count = len(unique_duplicate_tags)
+                
+                # Create detailed message
+                message = f"Data extraction completed successfully.\n\n"
+                message += f"Found {duplicate_count} unique tag(s) with duplicates:\n\n"
+                
+                # Limit to first 5 tags in the message to avoid overwhelming the user
+                shown_tags = list(unique_duplicate_tags)[:5]
+                for tag in shown_tags:
+                    occurrences = [info for info in duplicate_tags_info if info['tag'] == tag]
+                    message += f"• '{tag}': {len(occurrences) + 1} total occurrences\n"
+                
+                if duplicate_count > 5:
+                    message += f"\n... and {duplicate_count - 5} more duplicate tag(s)."
+                
+                message += "\n\nDuplicate tags were automatically renamed with suffixes (e.g., tag_2, tag_3).\n"
+                message += "Check the console/log for detailed information."
+                
+                messagebox.showwarning("Extraction Complete - Duplicates Found", message)
+            else:
+                messagebox.showinfo("Result", "Data extraction completed successfully.")
             
             if not self.callback:
                 
