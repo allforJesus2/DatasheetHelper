@@ -1,7 +1,8 @@
 import tkinter as tk
-from tkinter import scrolledtext, messagebox, filedialog
+from tkinter import scrolledtext, messagebox, filedialog, ttk
 import re
 import os
+import json
 from io import BytesIO
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 # Import pdfplumber for PDF text extraction
@@ -47,6 +48,14 @@ class RegexMatcherGUI:
         self.root.grid_rowconfigure(6, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
         
+        # Path to store regex history
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.regex_history_file = os.path.join(script_dir, "regex_history.json")
+        self.regex_history = []
+        
+        # Load regex history on startup
+        self.load_regex_history()
+        
         self.setup_ui()
     
     def setup_ui(self):
@@ -81,10 +90,17 @@ class RegexMatcherGUI:
         )
         extract_button.grid(row=0, column=3, padx=(0, 5))
         
-        # Title
-        title_label = tk.Label(self.root, text="Regular Expression Matcher", 
-                              font=("Arial", 16, "bold"))
-        title_label.grid(row=1, column=0, pady=10, sticky="ew")
+        # New Instance button
+        new_instance_button = tk.Button(
+            pdf_frame,
+            text="New Instance",
+            command=self.spawn_new_instance,
+            font=("Arial", 10),
+            bg="#FF9800",
+            fg="white",
+            padx=15
+        )
+        new_instance_button.grid(row=0, column=4, padx=(0, 5))
         
         # Input header with label and Paste button
         input_header = tk.Frame(self.root)
@@ -114,9 +130,12 @@ class RegexMatcherGUI:
         regex_label = tk.Label(regex_frame, text="Regular Expression:", font=("Arial", 12, "bold"))
         regex_label.grid(row=0, column=0, sticky="w", padx=(0, 10))
         
-        self.regex_entry = tk.Entry(regex_frame, font=("Consolas", 11), width=50)
+        # Use Combobox instead of Entry for dropdown functionality
+        self.regex_entry = ttk.Combobox(regex_frame, font=("Consolas", 11), width=47)
         self.regex_entry.grid(row=0, column=1, sticky="ew", padx=(0, 10))
         self.regex_entry.bind('<Return>', lambda e: self.find_matches())
+        # Update dropdown values when history changes
+        self.update_regex_dropdown()
         
         # Match button
         self.match_button = tk.Button(
@@ -142,9 +161,19 @@ class RegexMatcherGUI:
         )
         clear_button.grid(row=0, column=3)
         
-        # Output text area
-        output_label = tk.Label(self.root, text="Matches (one per line):", font=("Arial", 12, "bold"))
-        output_label.grid(row=5, column=0, sticky="w", padx=10, pady=(0, 5))
+        # Output text area header
+        output_header = tk.Frame(self.root)
+        output_header.grid(row=5, column=0, sticky="ew", padx=10, pady=(0, 5))
+        output_header.grid_columnconfigure(0, weight=1)
+        
+        output_label = tk.Label(output_header, text="Matches (one per line):", font=("Arial", 12, "bold"))
+        output_label.grid(row=0, column=0, sticky="w")
+        
+        # Line count display
+        self.line_count_var = tk.StringVar()
+        self.line_count_var.set("Lines: 0")
+        line_count_label = tk.Label(output_header, textvariable=self.line_count_var, font=("Arial", 10), fg="gray")
+        line_count_label.grid(row=0, column=1, sticky="e", padx=(10, 0))
         
         self.output_text = scrolledtext.ScrolledText(
             self.root, 
@@ -155,9 +184,25 @@ class RegexMatcherGUI:
         )
         self.output_text.grid(row=6, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
-        # Copy button under output
-        copy_button = tk.Button(self.root, text="Copy Matches", command=self.copy_output, font=("Arial", 10))
-        copy_button.grid(row=7, column=0, sticky="e", padx=10, pady=(0, 5))
+        # Buttons frame under output
+        buttons_frame = tk.Frame(self.root)
+        buttons_frame.grid(row=7, column=0, sticky="e", padx=10, pady=(0, 5))
+        
+        # Show Unique button
+        unique_button = tk.Button(
+            buttons_frame, 
+            text="Show Unique", 
+            command=self.show_unique_matches, 
+            font=("Arial", 10),
+            bg="#9C27B0",
+            fg="white",
+            padx=15
+        )
+        unique_button.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Copy button
+        copy_button = tk.Button(buttons_frame, text="Copy Matches", command=self.copy_output, font=("Arial", 10))
+        copy_button.pack(side=tk.LEFT)
         
         # Status bar
         self.status_var = tk.StringVar()
@@ -200,6 +245,24 @@ class RegexMatcherGUI:
         if hasattr(self, 'tooltip'):
             self.tooltip.destroy()
     
+    def update_line_count(self):
+        """Update the line count display based on current output"""
+        # Temporarily enable to read content
+        was_disabled = str(self.output_text.cget("state")) == str(tk.DISABLED)
+        if was_disabled:
+            self.output_text.config(state=tk.NORMAL)
+        
+        text = self.output_text.get("1.0", "end-1c").strip()
+        
+        if was_disabled:
+            self.output_text.config(state=tk.DISABLED)
+        
+        if not text:
+            self.line_count_var.set("Lines: 0")
+        else:
+            line_count = len([line for line in text.split('\n') if line.strip()])
+            self.line_count_var.set(f"Lines: {line_count}")
+    
     def find_matches(self):
         """Find and display regex matches"""
         try:
@@ -223,6 +286,9 @@ class RegexMatcherGUI:
                 messagebox.showerror("Regex Error", f"Invalid regular expression:\n{str(e)}")
                 return
             
+            # Save regex pattern to history (only if valid)
+            self.save_regex_to_history(regex_pattern)
+            
             # Find all matches
             matches = pattern.findall(input_text)
             
@@ -240,6 +306,7 @@ class RegexMatcherGUI:
                 self.status_var.set("No matches found")
             
             self.output_text.config(state=tk.DISABLED)
+            self.update_line_count()
             
         except Exception as e:
             self.status_var.set(f"Error: {str(e)}")
@@ -255,6 +322,48 @@ class RegexMatcherGUI:
         self.input_text.insert(tk.INSERT, clipboard_text)
         self.status_var.set("Pasted clipboard into input")
 
+    def show_unique_matches(self):
+        """Filter output to show only unique matches"""
+        # Temporarily enable to read content
+        was_disabled = str(self.output_text.cget("state")) == str(tk.DISABLED)
+        if was_disabled:
+            self.output_text.config(state=tk.NORMAL)
+        
+        text = self.output_text.get("1.0", "end-1c").strip()
+        
+        if not text:
+            self.status_var.set("No matches to filter")
+            if was_disabled:
+                self.output_text.config(state=tk.DISABLED)
+            return
+        
+        # Split by lines and get unique values (preserving order)
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        seen = set()
+        unique_lines = []
+        for line in lines:
+            if line not in seen:
+                seen.add(line)
+                unique_lines.append(line)
+        
+        # Update output with unique values
+        self.output_text.delete("1.0", tk.END)
+        if unique_lines:
+            unique_text = "\n".join(unique_lines)
+            self.output_text.insert("1.0", unique_text)
+            original_count = len(lines)
+            unique_count = len(unique_lines)
+            removed_count = original_count - unique_count
+            self.status_var.set(f"Showing {unique_count} unique match(es) (removed {removed_count} duplicate(s))")
+        else:
+            self.output_text.insert("1.0", "No matches found")
+            self.status_var.set("No matches found")
+        
+        if was_disabled:
+            self.output_text.config(state=tk.DISABLED)
+        
+        self.update_line_count()
+    
     def copy_output(self):
         """Copy matches output to the clipboard"""
         # Temporarily enable to read content
@@ -438,12 +547,79 @@ class RegexMatcherGUI:
     def clear_all(self):
         """Clear all text areas and input fields"""
         self.input_text.delete("1.0", tk.END)
-        self.regex_entry.delete(0, tk.END)
+        self.regex_entry.set("")
         self.pdf_path_entry.delete(0, tk.END)
         self.output_text.config(state=tk.NORMAL)
         self.output_text.delete("1.0", tk.END)
         self.output_text.config(state=tk.DISABLED)
         self.status_var.set("Cleared - Ready for new input")
+        self.update_line_count()
+    
+    def load_regex_history(self):
+        """Load regex history from JSON file"""
+        try:
+            if os.path.exists(self.regex_history_file):
+                with open(self.regex_history_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # Ensure it's a list
+                    if isinstance(data, list):
+                        self.regex_history = data
+                    else:
+                        self.regex_history = []
+            else:
+                self.regex_history = []
+        except Exception as e:
+            # If loading fails, start with empty history
+            self.regex_history = []
+            print(f"Warning: Could not load regex history: {e}")
+    
+    def save_regex_to_history(self, regex_pattern):
+        """Save regex pattern to history, moving to top if already exists"""
+        if not regex_pattern:
+            return
+        
+        # If pattern already exists, remove it first (to move to top)
+        if regex_pattern in self.regex_history:
+            self.regex_history.remove(regex_pattern)
+        
+        # Add to beginning of list (most recent first)
+        self.regex_history.insert(0, regex_pattern)
+        # Limit history to last 50 entries
+        if len(self.regex_history) > 50:
+            self.regex_history = self.regex_history[:50]
+        
+        # Save to disk
+        try:
+            with open(self.regex_history_file, 'w', encoding='utf-8') as f:
+                json.dump(self.regex_history, f, indent=2, ensure_ascii=False)
+            
+            # Update dropdown
+            self.update_regex_dropdown()
+        except Exception as e:
+            print(f"Warning: Could not save regex history: {e}")
+    
+    def update_regex_dropdown(self):
+        """Update the combobox values with current history"""
+        self.regex_entry['values'] = self.regex_history
+    
+    def spawn_new_instance(self):
+        """Create a new instance of the application window"""
+        try:
+            # Create a new root window and app instance
+            new_root = tk.Tk()
+            new_app = RegexMatcherGUI(new_root)
+            
+            # Center the new window on screen
+            new_root.update_idletasks()
+            x = (new_root.winfo_screenwidth() // 2) - (new_root.winfo_width() // 2)
+            y = (new_root.winfo_screenheight() // 2) - (new_root.winfo_height() // 2)
+            new_root.geometry(f"+{x}+{y}")
+            
+            self.status_var.set("New instance created")
+        except Exception as e:
+            error_msg = f"Error creating new instance: {str(e)}"
+            self.status_var.set(error_msg)
+            messagebox.showerror("Error", error_msg)
 
 def main():
     root = tk.Tk()
