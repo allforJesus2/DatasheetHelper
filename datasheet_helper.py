@@ -249,6 +249,13 @@ class DatasheetGeneratorApp:
         
         # Widget references for each data source
         self.data_source_widgets = {}  # Structure: {data_source: {'frame': widget, 'config_notebook': widget, 'combo': widget, 'listbox': widget}}
+        
+        # Centralized destination definitions
+        print("DEBUG: Setting up destination definitions...")
+        self.destinations = {}
+        
+        # Widget references for each destination
+        self.destination_widgets = {}  # Structure: {destination: {'frame': widget, 'entries': {...}}}
 
 
 
@@ -273,6 +280,18 @@ class DatasheetGeneratorApp:
         # Initialize datasheets attribute
         self.destination_datasheet = None
         
+        # Create a default destination if none exist (for backward compatibility)
+        if not self.destinations:
+            default_dest = "Default"
+            self.destinations[default_dest] = {
+                'path': '',
+                'datasheet_coord': '',
+                'ds_str': '',
+                'rows_per_sheet': 1,
+                'sig_figs': 4,
+                'rounding_tolerance': 1e-2
+            }
+            print(f"DEBUG: Created default destination: {default_dest}")
 
         print("DEBUG: About to create widgets...")
         self.create_widgets()
@@ -343,7 +362,7 @@ class DatasheetGeneratorApp:
                 tab_found = False
                 for i in range(self.data_sources_notebook.index("end")):
                     tab_text = self.data_sources_notebook.tab(i, "text")
-                    base_tab_text = tab_text.replace(" ✓", "")
+                    base_tab_text = self.strip_tab_indicators(tab_text)
                     
                     if base_tab_text == data_source:
                         tab_found = True
@@ -519,6 +538,28 @@ class DatasheetGeneratorApp:
         """Get all available data sources"""
         return list(self.data_sources.keys())
     
+    def get_all_destinations(self):
+        """Get all destination names"""
+        return list(self.destinations.keys())
+    
+    def get_current_destination(self):
+        """Get the current destination (currently selected tab)"""
+        if hasattr(self, 'destinations_notebook'):
+            try:
+                selected_tab = self.destinations_notebook.select()
+                if selected_tab:
+                    tab_text = self.destinations_notebook.tab(selected_tab, "text")
+                    if tab_text in self.destinations:
+                        return tab_text
+            except Exception as e:
+                print(f"Error getting selected destination tab: {e}")
+        
+        # Fallback to first destination if no tab is selected
+        destinations = self.get_all_destinations()
+        if destinations:
+            return destinations[0]
+        return None
+    
     def get_primary_data_source(self):
         """Get the primary data source (currently selected tab)"""
         if hasattr(self, 'data_sources_notebook'):
@@ -529,7 +570,7 @@ class DatasheetGeneratorApp:
                     # Get the tab text which contains the data source name
                     tab_text = self.data_sources_notebook.tab(selected_tab, "text")
                     # Remove checkmark if present
-                    data_source = tab_text.replace(" ✓", "").strip()
+                    data_source = self.strip_tab_indicators(tab_text).strip()
                     # Verify this data source exists
                     if data_source in self.data_sources:
                         return data_source
@@ -555,7 +596,7 @@ class DatasheetGeneratorApp:
         try:
             for tab_id in self.data_sources_notebook.tabs():
                 tab_text = self.data_sources_notebook.tab(tab_id, "text")
-                normalized_text = tab_text.replace(" ✓", "").strip()
+                normalized_text = self.strip_tab_indicators(tab_text).strip()
                 if normalized_text == data_source_name:
                     self.data_sources_notebook.select(tab_id)
                     break
@@ -570,12 +611,37 @@ class DatasheetGeneratorApp:
         dialog.transient(self.root)
         dialog.grab_set()
         
+        # Get all data sources and store them
+        all_data_sources = self.get_all_data_sources()
+        
+        # Search entry box
+        search_frame = Frame(dialog)
+        search_frame.pack(fill=X, padx=10, pady=(10, 5))
+        Label(search_frame, text="Search:").pack(side=LEFT, padx=(0, 5))
+        search_entry = Entry(search_frame)
+        search_entry.pack(side=LEFT, fill=X, expand=True)
+        search_entry.focus_set()
+        
         # Listbox with all data sources
         listbox = tk.Listbox(dialog)
-        for name in self.get_all_data_sources():
+        for name in all_data_sources:
             listbox.insert(END, name)
-        listbox.pack(fill=BOTH, expand=True, padx=10, pady=10)
-        listbox.focus_set()
+        listbox.pack(fill=BOTH, expand=True, padx=10, pady=(5, 10))
+        
+        def filter_listbox(event=None):
+            """Filter the listbox based on search entry"""
+            search_term = search_entry.get().lower()
+            listbox.delete(0, END)
+            for name in all_data_sources:
+                if search_term in name.lower():
+                    listbox.insert(END, name)
+            # Select first item if available
+            if listbox.size() > 0:
+                listbox.selection_set(0)
+                listbox.activate(0)
+        
+        # Bind search entry to filter function
+        search_entry.bind('<KeyRelease>', filter_listbox)
         
         def on_select(event=None):
             selection = listbox.curselection()
@@ -614,7 +680,7 @@ class DatasheetGeneratorApp:
         # Create the new data source configuration
         new_config = {
             'headers': [],
-            'coordinate_values': {},
+            'coordinate_values': {},  # Will be structured as {destination: {coord: value}}
             'selected_sheets': None,
             'path': '',  # File path stored directly in config
             'top_tag': '',  # Default top tag
@@ -633,6 +699,41 @@ class DatasheetGeneratorApp:
         self.add_single_data_source_tab(data_source_id, new_config)
         
         messagebox.showinfo("Success", f"data source '{data_source_id}' created successfully!")
+
+    def add_destination_from_entry(self, event=None):
+        """Add a new destination from the text entry box"""
+        destination_id = self.add_destination_entry.get().strip()
+        
+        # Validation
+        if not destination_id:
+            messagebox.showerror("Error", "Destination ID is required")
+            return
+        
+        # Check if destination already exists
+        if destination_id in self.destinations:
+            messagebox.showerror("Error", f"Destination '{destination_id}' already exists")
+            return
+        
+        # Create the new destination configuration
+        new_config = {
+            'path': '',  # File path for destination datasheet
+            'datasheet_coord': '',
+            'ds_str': '',  # Prefix
+            'rows_per_sheet': 1,
+            'sig_figs': 4,
+            'rounding_tolerance': 1e-2
+        }
+        
+        # Add to destinations
+        self.add_destination(destination_id, new_config)
+        
+        # Clear the entry box
+        self.add_destination_entry.delete(0, tk.END)
+        
+        # Note: add_destination() already calls refresh_destinations_notebook() which adds the tab
+        # No need to call add_single_destination_tab() separately
+        
+        messagebox.showinfo("Success", f"Destination '{destination_id}' created successfully!")
 
     def add_single_data_source_tab(self, data_source, config):
         """Add a single new data source tab without affecting existing tabs or entries"""
@@ -685,11 +786,110 @@ class DatasheetGeneratorApp:
         if 'path' not in self.data_sources[data_source]:
             self.data_sources[data_source]['path'] = ''
         
+        # Initialize coordinate maps for all destinations with this new data source
+        self.initialize_coordinate_maps_for_all_combinations()
         
         # Refresh the GUI to include the new data source
         if hasattr(self, 'root') and self.root:
             self.refresh_data_source_frames()
     
+    def add_destination(self, destination, config):
+        """Add a new destination configuration"""
+        # Ensure the config has all required fields with defaults
+        default_config = {
+            'path': '',
+            'datasheet_coord': '',
+            'ds_str': '',
+            'rows_per_sheet': 1,
+            'sig_figs': 4,
+            'rounding_tolerance': 1e-2
+        }
+        default_config.update(config)
+        
+        # Add to the centralized destinations dictionary
+        self.destinations[destination] = default_config
+        
+        # Initialize coordinate maps for all data sources with this new destination
+        self.initialize_coordinate_maps_for_all_combinations()
+        
+        # Refresh the GUI to include the new destination
+        if hasattr(self, 'root') and self.root:
+            if hasattr(self, 'destinations_notebook'):
+                self.refresh_destinations_notebook()
+    
+    def initialize_coordinate_maps_for_all_combinations(self):
+        """Initialize coordinate maps for all data source * destination combinations.
+        Ensures that every data source has a coordinate_values entry for every destination.
+        Also handles migration from old format (flat dict) to new format (nested by destination)."""
+        all_data_sources = self.get_all_data_sources()
+        all_destinations = self.get_all_destinations()
+        
+        # If no destinations exist, create a default one (directly to avoid recursion)
+        if not all_destinations:
+            default_dest = "Default"
+            if default_dest not in self.destinations:
+                default_config = {
+                    'path': '',
+                    'datasheet_coord': '',
+                    'ds_str': '',
+                    'rows_per_sheet': 1,
+                    'sig_figs': 4,
+                    'rounding_tolerance': 1e-2
+                }
+                self.destinations[default_dest] = default_config
+                # Refresh GUI if available
+                if hasattr(self, 'root') and self.root:
+                    if hasattr(self, 'destinations_notebook'):
+                        self.refresh_destinations_notebook()
+            all_destinations = self.get_all_destinations()
+        
+        for data_source in all_data_sources:
+            # Ensure coordinate_values exists and is a dict
+            if 'coordinate_values' not in self.data_sources[data_source]:
+                self.data_sources[data_source]['coordinate_values'] = {}
+            elif not isinstance(self.data_sources[data_source]['coordinate_values'], dict):
+                # Handle corrupted data - reset to empty dict
+                self.data_sources[data_source]['coordinate_values'] = {}
+            
+            coord_vals = self.data_sources[data_source]['coordinate_values']
+            
+            # Check if coordinate_values is in old format (flat dict with coordinate keys)
+            # New format has coordinate_values[destination] = {coord: value}
+            if coord_vals:
+                # Check if any key matches a destination name (new format)
+                is_nested = any(dest in coord_vals for dest in all_destinations)
+                
+                if not is_nested and coord_vals:
+                    # Likely old format - check if keys look like coordinates (A1, B2, etc.)
+                    sample_key = list(coord_vals.keys())[0] if coord_vals else None
+                    if sample_key and (len(sample_key) <= 4 and sample_key[0].isalpha()):
+                        # Old format detected - migrate to new format using first/default destination
+                        default_dest = all_destinations[0]
+                        old_coords = coord_vals.copy()
+                        self.data_sources[data_source]['coordinate_values'] = {
+                            default_dest: old_coords
+                        }
+                        print(f"Migrated coordinate_values for '{data_source}' from old format to '{default_dest}' destination")
+                        coord_vals = self.data_sources[data_source]['coordinate_values']
+            
+            # Initialize coordinate_values for each destination (create empty dict if missing)
+            for destination in all_destinations:
+                if destination not in coord_vals:
+                    coord_vals[destination] = {}
+
+    def add_single_destination_tab(self, destination, config):
+        """Add a single new destination tab without affecting existing tabs or entries"""
+        if not hasattr(self, 'destinations_notebook'):
+            return
+        
+        # Create main tab for this destination
+        destination_tab = ttk.Frame(self.destinations_notebook)
+        self.destinations_notebook.add(destination_tab, text=destination)
+        
+        # Create the destination tab content
+        self.create_destination_tab_content(destination_tab, destination, config)
+        
+        print(f"Added new tab for destination: {destination}")
 
     
     def create_data_source_frames(self, parent):
@@ -813,6 +1013,9 @@ class DatasheetGeneratorApp:
         # Update all tab indicators after creating tabs
         self.update_all_tab_indicators()
         
+        # Update all tab colors based on coordinate maps
+        self.update_all_tab_colors()
+        
         # Bind tab change event to update primary data source
         self.data_sources_notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         
@@ -820,6 +1023,50 @@ class DatasheetGeneratorApp:
         self.data_sources_notebook.bind("<Button-3>", self.show_tab_context_menu)
         
         print("DEBUG: create_data_sources_notebook completed!")
+    
+    def create_destinations_notebook(self, parent):
+        """Create a notebook with tabs for each destination"""
+        print("DEBUG: Starting create_destinations_notebook...")
+        
+        # Add a label and button for the destinations section
+        destinations_frame = ttk.Frame(parent)
+        destinations_frame.pack(fill="x", padx=5, pady=(5,0))
+        
+        destinations_label = tk.Label(destinations_frame, text="DESTINATIONS", font=("Arial", 10, "bold"), fg="blue")
+        destinations_label.pack(side="left")
+        
+        # Add text entry and button to create new destination
+        add_destination_frame = ttk.Frame(destinations_frame)
+        add_destination_frame.pack(side="right")
+        
+        self.add_destination_entry = ttk.Entry(add_destination_frame, width=18)
+        self.add_destination_entry.pack(side="left", padx=(0, 5))
+        self.add_destination_entry.bind('<Return>', self.add_destination_from_entry)
+        self.add_destination_entry.insert(0, "Enter destination...")
+        self.add_destination_entry.bind('<FocusIn>', lambda e: self.add_destination_entry.delete(0, tk.END) if self.add_destination_entry.get() == "Enter destination..." else None)
+        
+        add_destination_btn = ttk.Button(add_destination_frame, text="+ Add Destination", 
+                                      command=self.add_destination_from_entry, width=18)
+        add_destination_btn.pack(side="left")
+        
+        # Create the main destinations notebook
+        self.destinations_notebook = ttk.Notebook(parent)
+        # Bind to tab change event to update button references
+        self.destinations_notebook.bind("<<NotebookTabChanged>>", self.on_destination_tab_changed)
+        self.destinations_notebook.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Create tabs for each destination
+        for destination in self.get_all_destinations():
+            config = self.destinations[destination]
+            
+            # Create main tab for this destination
+            destination_tab = ttk.Frame(self.destinations_notebook)
+            self.destinations_notebook.add(destination_tab, text=destination)
+            
+            # Create the destination tab content
+            self.create_destination_tab_content(destination_tab, destination, config)
+        
+        print("DEBUG: create_destinations_notebook completed!")
     
     def clear_search_placeholder(self):
         """Clear the placeholder text when user focuses on search entry"""
@@ -1049,7 +1296,7 @@ class DatasheetGeneratorApp:
         
         # Get the data source from the tab text (remove check mark if present)
         tab_text = self.data_sources_notebook.tab(tab_index, "text")
-        data_source = tab_text.replace(" ✓", "")  # Remove check mark to get base data source
+        data_source = self.strip_tab_indicators(tab_text)  # Remove indicators to get base data source
         
         # Create context menu
         context_menu = tk.Menu(self.root, tearoff=0)
@@ -1131,11 +1378,8 @@ class DatasheetGeneratorApp:
                     # Recreate the full tab content with the new data source name
                     self.create_data_source_tab_content(tab_widget, new_data_source, self.data_sources[new_data_source])
                     
-                    # Update the tab text
-                    if " ✓" in tab_text:
-                        new_tab_text = f"{new_data_source} ✓"
-                    else:
-                        new_tab_text = new_data_source
+                    # Update the tab text using centralized function
+                    new_tab_text = self.get_tab_text_with_indicators(new_data_source)
                     self.data_sources_notebook.tab(i, text=new_tab_text)
                     print(f"Recreated tab content for renamed data source: {new_data_source}")
                     break
@@ -1150,44 +1394,101 @@ class DatasheetGeneratorApp:
         # Find the tab with the old data source name
         for i in range(self.data_sources_notebook.index("end")):
             tab_text = self.data_sources_notebook.tab(i, "text")
-            # Remove check mark if present to get the base data source
-            base_tab_text = tab_text.replace(" ✓", "")
+            # Remove indicators to get the base data source
+            base_tab_text = self.strip_tab_indicators(tab_text)
             
             if base_tab_text == old_data_source:
-                # Update the tab text to the new data source name
-                # Preserve the check mark if it was there
-                if " ✓" in tab_text:
-                    new_tab_text = f"{new_data_source} ✓"
-                else:
-                    new_tab_text = new_data_source
-                
+                # Update the tab text using centralized function
+                new_tab_text = self.get_tab_text_with_indicators(new_data_source)
                 self.data_sources_notebook.tab(i, text=new_tab_text)
                 print(f"Updated tab text from '{tab_text}' to '{new_tab_text}'")
                 break
+    
+    def get_tab_text_with_indicators(self, data_source):
+        """Centralized function to build tab text with appropriate indicators.
+        Returns the formatted tab text based on data source state.
+        
+        Indicators:
+        - 🗺️ = coordinate map exists for current destination
+        - ✓ = data is populated
+        """
+        if data_source not in self.data_sources:
+            return data_source
+        
+        base_text = data_source
+        
+        # Check if data is populated
+        has_data = bool(self.data_sources[data_source].get('data', {}))
+        
+        # Check if coordinate map exists for current destination
+        has_coordinate_map = False
+        current_destination = self.get_current_destination()
+        if current_destination:
+            coord_vals = self.data_sources[data_source].get('coordinate_values', {})
+            if current_destination in coord_vals:
+                destination_coords = coord_vals[current_destination]
+                has_coordinate_map = bool(destination_coords and len(destination_coords) > 0)
+        
+        # Build text with indicators (order: map indicator first, then data indicator)
+        if has_coordinate_map:
+            base_text += "🗺️"
+        if has_data:
+            base_text += "✓"
+        
+        return base_text
+    
+    def strip_tab_indicators(self, tab_text):
+        """Centralized function to remove indicators from tab text.
+        Returns the base data source name without indicators.
+        
+        Removes:
+        - 🗺️ = coordinate map indicator
+        - ✓ = data populated indicator
+        """
+        return tab_text.replace("🗺️", "").replace("✓", "")
     
     def add_checkmark_to_tab(self, data_source):
         """Add a checkmark to the tab to indicate data is populated"""
         if not hasattr(self, 'data_sources_notebook'):
             return
         
-        # Find the tab index for this data source
+        # Use update_tab_color_for_data_source which handles both data and coordinate map indicators
+        self.update_tab_color_for_data_source(data_source)
+    
+    def update_tab_color_for_data_source(self, data_source, tab_index=None):
+        """Update tab text to include indicators based on data source state"""
+        if not hasattr(self, 'data_sources_notebook'):
+            return
+        
+        # Find tab index if not provided
+        if tab_index is None:
+            for i in range(self.data_sources_notebook.index("end")):
+                tab_text = self.data_sources_notebook.tab(i, "text")
+                base_data_source = self.strip_tab_indicators(tab_text)
+                if base_data_source == data_source:
+                    tab_index = i
+                    break
+        
+        if tab_index is None:
+            return
+        
+        # Get the properly formatted tab text with indicators
+        try:
+            new_text = self.get_tab_text_with_indicators(data_source)
+            self.data_sources_notebook.tab(tab_index, text=new_text)
+        except Exception as e:
+            print(f"Warning: Could not update tab indicator for {data_source}: {e}")
+    
+    def update_all_tab_colors(self):
+        """Update indicators for all data source tabs based on coordinate maps"""
+        if not hasattr(self, 'data_sources_notebook'):
+            return
+        
         for i in range(self.data_sources_notebook.index("end")):
             tab_text = self.data_sources_notebook.tab(i, "text")
-            # Remove any existing check mark to get the base data source
-            base_data_source = tab_text.replace(" ✓", "")
-            if base_data_source == data_source:
-                # Check if data is populated
-                data = self.data_sources[data_source]['data']
-                has_data = bool(data and len(data) > 0)
-                
-                # Update tab text with or without check mark
-                if has_data:
-                    new_text = f"{data_source} ✓"
-                else:
-                    new_text = data_source
-                
-                self.data_sources_notebook.tab(i, text=new_text)
-                break
+            base_data_source = self.strip_tab_indicators(tab_text)
+            if base_data_source in self.data_sources:
+                self.update_tab_color_for_data_source(base_data_source, i)
     
     def delete_data_source(self, data_source):
         """Delete a data source"""
@@ -1267,9 +1568,61 @@ class DatasheetGeneratorApp:
         # Update all tab indicators
         self.update_all_tab_indicators()
         
+        # Update all tab colors based on coordinate maps
+        self.update_all_tab_colors()
+        
         # Switch to the first tab if any exist
         if self.data_sources_notebook.index("end") > 0:
             self.data_sources_notebook.select(0)
+    
+    def refresh_destinations_notebook(self):
+        """Refresh destinations notebook when destinations are added/removed"""
+        if not hasattr(self, 'destinations_notebook'):
+            return
+        
+        # Get current destinations
+        current_destinations = set(self.get_all_destinations())
+        
+        # Get existing tabs
+        existing_tabs = {}
+        for i in range(self.destinations_notebook.index("end")):
+            tab_text = self.destinations_notebook.tab(i, "text")
+            existing_tabs[tab_text] = i
+        
+        # Find tabs to remove
+        tabs_to_remove = []
+        for tab_text, tab_index in existing_tabs.items():
+            if tab_text not in current_destinations:
+                tabs_to_remove.append(tab_index)
+        
+        # Remove tabs in reverse order to maintain indices
+        for tab_index in sorted(tabs_to_remove, reverse=True):
+            tab_text = None
+            for text, idx in existing_tabs.items():
+                if idx == tab_index:
+                    tab_text = text
+                    break
+            self.destinations_notebook.forget(tab_index)
+            if tab_text:
+                print(f"Removed tab for destination: {tab_text}")
+        
+        # Add tabs for any new destinations that don't exist yet
+        for destination in current_destinations:
+            if destination not in existing_tabs:
+                config = self.destinations[destination]
+                
+                # Create main tab for this destination
+                destination_tab = ttk.Frame(self.destinations_notebook)
+                self.destinations_notebook.add(destination_tab, text=destination)
+                
+                # Create the destination tab content
+                self.create_destination_tab_content(destination_tab, destination, config)
+                
+                print(f"Added new tab for destination: {destination}")
+        
+        # Switch to the first tab if any exist
+        if self.destinations_notebook.index("end") > 0:
+            self.destinations_notebook.select(0)
     
     def create_data_source_tab_content(self, parent, data_source, config):
         """Create the content for a data source tab, including file selection and nested configuration tabs"""
@@ -1347,6 +1700,273 @@ class DatasheetGeneratorApp:
         if data_source not in self.data_source_widgets:
             self.data_source_widgets[data_source] = {}
         self.data_source_widgets[data_source]['config_notebook'] = config_notebook
+    
+    def create_destination_tab_content(self, parent, destination, config):
+        """Create the content for a destination tab"""
+        # Create main content frame with left and right sections
+        content_frame = tk.Frame(parent)
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Left section for configuration fields
+        left_section = tk.Frame(content_frame)
+        left_section.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 10))
+        
+        # Right section for action buttons
+        right_section = tk.Frame(content_frame, relief=tk.RAISED, borderwidth=1)
+        right_section.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 5))
+        
+        # === LEFT SECTION: Configuration Fields ===
+        
+        # Datasheets Row
+        ds_frame = tk.Frame(left_section)
+        ds_frame.pack(fill=tk.X, pady=2)
+        
+        # Help button
+        ds_help_btn = tk.Button(ds_frame, text="?", width=2, 
+                                command=lambda: self.show_help("datasheets_destination.txt"))
+        ds_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
+        ds_label = tk.Label(ds_frame, text="Datasheets (Destination)", width=30)
+        ds_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        ds_entry = tk.Entry(ds_frame)
+        ds_entry._destination = destination
+        ds_entry._variable_name = "datasheets"
+        if config.get('path'):
+            ds_entry.insert(0, config['path'])
+        ds_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # Store reference to datasheet entry
+        if destination not in self.destination_widgets:
+            self.destination_widgets[destination] = {}
+        self.destination_widgets[destination]['datasheet_entry'] = ds_entry
+        
+        ds_buttons = tk.Frame(ds_frame)
+        ds_buttons.pack(side=tk.RIGHT)
+        
+        tk.Button(ds_buttons, text="Browse",
+                  command=lambda: self.browse_datasheets(ds_entry, destination)).pack(side=tk.LEFT, padx=2)
+        tk.Button(ds_buttons, text="Map Coordinates",
+                  command=lambda: self.configure_ds(destination)).pack(side=tk.LEFT, padx=2)
+        
+        # Datasheet Coordinate Row
+        coord_frame = tk.Frame(left_section)
+        coord_frame.pack(fill=tk.X, pady=2)
+        
+        coord_help_btn = tk.Button(coord_frame, text="?", width=2, 
+                                   command=lambda: self.show_help("datasheet_coordinate.txt"))
+        coord_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
+        coord_label = tk.Label(coord_frame, text="Datasheet Coordinate", width=30)
+        coord_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        coord_entry = tk.Entry(coord_frame)
+        coord_entry._destination = destination
+        coord_entry._variable_name = "datasheet_coord"
+        if config.get('datasheet_coord'):
+            coord_entry.insert(0, config['datasheet_coord'])
+        coord_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.destination_widgets[destination]['datasheet_coord_entry'] = coord_entry
+        
+        # Datasheet Prefix Row
+        prefix_frame = tk.Frame(left_section)
+        prefix_frame.pack(fill=tk.X, pady=2)
+        
+        prefix_help_btn = tk.Button(prefix_frame, text="?", width=2, 
+                                    command=lambda: self.show_help("datasheet_prefix.txt"))
+        prefix_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
+        prefix_label = tk.Label(prefix_frame, text="Datasheet Prefix", width=30)
+        prefix_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        prefix_entry = tk.Entry(prefix_frame)
+        prefix_entry._destination = destination
+        prefix_entry._variable_name = "ds_str"
+        if config.get('ds_str'):
+            prefix_entry.insert(0, config['ds_str'])
+        prefix_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.destination_widgets[destination]['ds_str_entry'] = prefix_entry
+        
+        # Rows per Sheet Row
+        rows_frame = tk.Frame(left_section)
+        rows_frame.pack(fill=tk.X, pady=2)
+        
+        rows_help_btn = tk.Button(rows_frame, text="?", width=2, 
+                                  command=lambda: self.show_help("rows_per_sheet.txt"))
+        rows_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
+        rows_label = tk.Label(rows_frame, text="Rows per Sheet", width=30)
+        rows_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        rows_entry = tk.Entry(rows_frame)
+        rows_entry._destination = destination
+        rows_entry._variable_name = "rows_per_sheet"
+        if config.get('rows_per_sheet'):
+            rows_entry.insert(0, str(config['rows_per_sheet']))
+        rows_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.destination_widgets[destination]['rows_per_sheet_entry'] = rows_entry
+        
+        # Significant Figures Row
+        sig_figs_frame = tk.Frame(left_section)
+        sig_figs_frame.pack(fill=tk.X, pady=2)
+        
+        sig_figs_help_btn = tk.Button(sig_figs_frame, text="?", width=2, 
+                                      command=lambda: self.show_help("significant_figures.txt"))
+        sig_figs_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
+        sig_figs_label = tk.Label(sig_figs_frame, text="Significant Figures", width=30)
+        sig_figs_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        sig_figs_entry = tk.Entry(sig_figs_frame)
+        sig_figs_entry._destination = destination
+        sig_figs_entry._variable_name = "sig_figs"
+        if config.get('sig_figs'):
+            sig_figs_entry.insert(0, str(config['sig_figs']))
+        sig_figs_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.destination_widgets[destination]['sig_figs_entry'] = sig_figs_entry
+        
+        # Rounding Tolerance Row
+        tolerance_frame = tk.Frame(left_section)
+        tolerance_frame.pack(fill=tk.X, pady=2)
+        
+        tolerance_help_btn = tk.Button(tolerance_frame, text="?", width=2, 
+                                       command=lambda: self.show_help("rounding_tolerance.txt"))
+        tolerance_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
+        tolerance_label = tk.Label(tolerance_frame, text="Rounding Tolerance", width=30)
+        tolerance_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        tolerance_entry = tk.Entry(tolerance_frame)
+        tolerance_entry._destination = destination
+        tolerance_entry._variable_name = "rounding_tolerance"
+        if config.get('rounding_tolerance'):
+            tolerance_entry.insert(0, str(config['rounding_tolerance']))
+        tolerance_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.destination_widgets[destination]['rounding_tolerance_entry'] = tolerance_entry
+        
+        # === RIGHT SECTION: Action Buttons ===
+        
+        # Add title for the right section
+        action_title = tk.Label(right_section, text="ACTIONS", font=("Arial", 9, "bold"), fg="darkgreen")
+        action_title.pack(pady=(10, 5))
+        
+        # Color coding method
+        color_frame = tk.Frame(right_section)
+        color_frame.pack(fill=tk.X, pady=5)
+        
+        # Help button
+        color_help_btn = tk.Button(color_frame, text="?", width=2, 
+                                   command=lambda: self.show_help("color_coding_method.txt"))
+        color_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        
+        color_label = tk.Label(color_frame, text="Color Coding Method:", width=20)
+        color_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Use instance variable if it exists, otherwise create it
+        if not hasattr(self, 'color_coding_var'):
+            self.color_coding_var = tk.StringVar(value="new_red_old_green")
+        color_dropdown = ttk.Combobox(color_frame, textvariable=self.color_coding_var, 
+                                     values=["None (Black)", "new_red_old_green", "new_red", "new_red_and_highlight"], 
+                                     state="readonly", width=20)
+        color_dropdown.pack(side=tk.LEFT, padx=5)
+        
+        # Fill mode option
+        fill_mode_frame = tk.Frame(right_section)
+        fill_mode_frame.pack(fill=tk.X, pady=5)
+        
+        fill_mode_label = tk.Label(fill_mode_frame, text="New Tags Sheet Fill Mode:", width=20)
+        fill_mode_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Use instance variable if it exists, otherwise create it
+        if not hasattr(self, 'fill_mode_var'):
+            self.fill_mode_var = tk.StringVar(value="continue_last")
+        fill_mode_dropdown = ttk.Combobox(fill_mode_frame, textvariable=self.fill_mode_var, 
+                                         values=["fill_blanks", "continue_last", "always_new", "ignore"], 
+                                         state="readonly", width=20)
+        fill_mode_dropdown.pack(side=tk.LEFT, padx=5)
+        
+        # Update matched tags option
+        update_matched_frame = tk.Frame(right_section)
+        update_matched_frame.pack(fill=tk.X, pady=5)
+        
+        update_matched_label = tk.Label(update_matched_frame, text="Update Matched Tags:", width=20)
+        update_matched_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Use instance variable if it exists, otherwise create it
+        if not hasattr(self, 'update_matched_var'):
+            self.update_matched_var = tk.StringVar(value="update")
+        update_matched_dropdown = ttk.Combobox(update_matched_frame, textvariable=self.update_matched_var, 
+                                               values=["update", "skip"], 
+                                               state="readonly", width=20)
+        update_matched_dropdown.pack(side=tk.LEFT, padx=5)
+        
+        # Green highlighting option
+        green_highlight_frame = tk.Frame(right_section)
+        green_highlight_frame.pack(fill=tk.X, pady=5)
+        
+        # Use instance variable if it exists, otherwise create it
+        if not hasattr(self, 'disable_green_highlight_var'):
+            self.disable_green_highlight_var = tk.BooleanVar(value=False)
+        disable_green_highlight_checkbox = tk.Checkbutton(
+            green_highlight_frame,
+            text="Disable Green Cell Highlighting",
+            variable=self.disable_green_highlight_var,
+            font=("Arial", 9)
+        )
+        disable_green_highlight_checkbox.pack(anchor=tk.W)
+        
+        # Append suffix option for green highlighted cells
+        if not hasattr(self, 'append_suffix_to_green_var'):
+            self.append_suffix_to_green_var = tk.BooleanVar(value=False)
+        append_suffix_checkbox = tk.Checkbutton(
+            green_highlight_frame,
+            text="Append suffix to green highlighted cells",
+            variable=self.append_suffix_to_green_var,
+            font=("Arial", 9)
+        )
+        append_suffix_checkbox.pack(anchor=tk.W)
+        
+        # Clear highlighting option for matched cells
+        if not hasattr(self, 'clear_highlighting_on_match_var'):
+            self.clear_highlighting_on_match_var = tk.BooleanVar(value=False)
+        clear_highlighting_checkbox = tk.Checkbutton(
+            green_highlight_frame,
+            text="Clear highlighting from matched cells",
+            variable=self.clear_highlighting_on_match_var,
+            font=("Arial", 9)
+        )
+        clear_highlighting_checkbox.pack(anchor=tk.W)
+        
+        # Add/Update button (per destination)
+        generate_button = tk.Button(right_section, text="Add/Update",
+                  command=self.add_datasheets, font=("Arial", 10, "bold"), 
+                  bg="green", fg="white", padx=20, pady=8, width=12)
+        generate_button.pack(pady=5, padx=10)
+        self.destination_widgets[destination]['generate_button'] = generate_button
+        
+        # Stop button (per destination)
+        stop_button = tk.Button(right_section, text="Stop",
+                  command=self.set_halt_flag, bg="red", fg="white", state="disabled",
+                  font=("Arial", 10, "bold"), padx=20, pady=8, width=12)
+        stop_button.pack(pady=5, padx=10)
+        self.destination_widgets[destination]['stop_button'] = stop_button
+        
+        # Add status label (per destination)
+        status_label = tk.Label(right_section, text="Ready", fg="black", font=("Arial", 9))
+        status_label.pack(anchor=tk.W, padx=5, pady=(5,0))
+        self.destination_widgets[destination]['status_label'] = status_label
+        
+        # Also set as the current buttons if this is the first destination or if we need a default
+        # This ensures backward compatibility with code that references self.generate_button directly
+        if not hasattr(self, 'generate_button') or self.generate_button is None:
+            self.generate_button = generate_button
+            self.stop_button = stop_button
+            self.status_label = status_label
+        else:
+            # Update to the most recently created destination's buttons
+            self.generate_button = generate_button
+            self.stop_button = stop_button
+            self.status_label = status_label
     
     def generate_data_source(self, data_source):
         """Generic method to generate data for any data source"""
@@ -1555,10 +2175,12 @@ class DatasheetGeneratorApp:
             ("Excel Regex Search App", self.open_excel_regex_search_app),
             ("Semantic Matcher", self.open_semantic_matcher),
             ("Release Excel", self.release_excel_connection),
+            ("Release All Excel", self.release_all_excel_connections),
             ("Stop Datasheet Generation", self.set_halt_flag),
             ("refresh tab content", self.refresh_tab_content(force_rebuild=True)),
             ('update combo box', self.update_combo_boxes),
             ('update coordinates combo', self.update_all_coordinates_combo_boxes),
+            ("Migrate to Multi-Destination Format", self.migrate_to_multi_destination),
         ]
         
         # Add dynamic menu items for each data source
@@ -1584,234 +2206,30 @@ class DatasheetGeneratorApp:
         print("DEBUG: Creating data sources notebook...")
         self.create_data_sources_notebook(main_frame)
 
-        # Add a visual separator between data sources and destination
+        # Add a visual separator between data sources and destinations
         print("DEBUG: Creating separator and destination container...")
         separator_frame = tk.Frame(main_frame, height=2, bg='gray')
         separator_frame.pack(fill=tk.X, pady=10)
         separator_frame.pack_propagate(False)
 
-        # Create destination container with distinct styling
-        destination_container = tk.Frame(main_frame, relief=tk.RAISED, borderwidth=2)
-        destination_container.pack(fill=tk.X, pady=5, padx=5)
-
-        # Destination label to indicate this is the output
-        dest_label = tk.Label(destination_container, text="DESTINATION", font=("Arial", 10, "bold"), fg="blue")
-        dest_label.pack(anchor=tk.W, padx=5, pady=(5,0))
-
-        # Create main content frame with left and right sections
-        content_frame = tk.Frame(destination_container)
-        content_frame.pack(fill=tk.X, pady=5)
-
-        # Left section for configuration fields
-        left_section = tk.Frame(content_frame)
-        left_section.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 10))
-
-        # Right section for action buttons
-        right_section = tk.Frame(content_frame, relief=tk.RAISED, borderwidth=1)
-        right_section.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 5))
-
-        # === LEFT SECTION: Configuration Fields ===
+        # Create destinations notebook with tabs for each destination
+        print("DEBUG: Creating destinations notebook...")
+        self.create_destinations_notebook(main_frame)
         
-        # Datasheets Row (single destination)
-        ds_frame = tk.Frame(left_section)
-        ds_frame.pack(fill=tk.X, pady=2)
-
-        # Help button
-        ds_help_btn = tk.Button(ds_frame, text="?", width=2, 
-                                command=lambda: self.show_help("datasheets_destination.txt"))
-        ds_help_btn.pack(side=tk.LEFT, padx=(5, 2))
-
-        ds_label = tk.Label(ds_frame, text="Datasheets (Destination)", width=30)
-        ds_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        ds_entry = tk.Entry(ds_frame)
-        ds_entry._variable_name = "datasheets"  # Store variable name for repopulation
-        ds_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        # Initialize global option variables (shared across all destinations)
+        if not hasattr(self, 'color_coding_var'):
+            self.color_coding_var = tk.StringVar(value="new_red_old_green")
+        if not hasattr(self, 'fill_mode_var'):
+            self.fill_mode_var = tk.StringVar(value="continue_last")
+        if not hasattr(self, 'update_matched_var'):
+            self.update_matched_var = tk.StringVar(value="update")
+        if not hasattr(self, 'disable_green_highlight_var'):
+            self.disable_green_highlight_var = tk.BooleanVar(value=False)
         
-        # Store reference to datasheet entry
-        self.datasheet_entry = ds_entry
-
-        ds_buttons = tk.Frame(ds_frame)
-        ds_buttons.pack(side=tk.RIGHT)
-
-        tk.Button(ds_buttons, text="Browse",
-                  command=lambda: self.browse_datasheets(ds_entry)).pack(side=tk.LEFT, padx=2)
-        tk.Button(ds_buttons, text="Map Coordinates",
-                  command=self.configure_ds).pack(side=tk.LEFT, padx=2)
-
-        # Datasheet Coordinate Row
-        coord_frame = tk.Frame(left_section)
-        coord_frame.pack(fill=tk.X, pady=2)
-
-        # Help button
-        coord_help_btn = tk.Button(coord_frame, text="?", width=2, 
-                                   command=lambda: self.show_help("datasheet_coordinate.txt"))
-        coord_help_btn.pack(side=tk.LEFT, padx=(5, 2))
-
-        coord_label = tk.Label(coord_frame, text="Datasheet Coordinate", width=30)
-        coord_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        coord_entry = tk.Entry(coord_frame)
-        coord_entry._variable_name = "datasheet_coord"  # Store variable name for repopulation
-        coord_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # Store reference to global entry
-        self.datasheet_coord_entry = coord_entry
-
-        # Datasheet Prefix Row
-        prefix_frame = tk.Frame(left_section)
-        prefix_frame.pack(fill=tk.X, pady=2)
-
-        # Help button
-        prefix_help_btn = tk.Button(prefix_frame, text="?", width=2, 
-                                    command=lambda: self.show_help("datasheet_prefix.txt"))
-        prefix_help_btn.pack(side=tk.LEFT, padx=(5, 2))
-
-        prefix_label = tk.Label(prefix_frame, text="Datasheet Prefix", width=30)
-        prefix_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        prefix_entry = tk.Entry(prefix_frame)
-        prefix_entry._variable_name = "ds_str"  # Store variable name for repopulation
-        prefix_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # Store reference to global entry
-        self.ds_str_entry = prefix_entry
-
-        # Rows per Sheet Row
-        rows_frame = tk.Frame(left_section)
-        rows_frame.pack(fill=tk.X, pady=2)
-
-        # Help button
-        rows_help_btn = tk.Button(rows_frame, text="?", width=2, 
-                                  command=lambda: self.show_help("rows_per_sheet.txt"))
-        rows_help_btn.pack(side=tk.LEFT, padx=(5, 2))
-
-        rows_label = tk.Label(rows_frame, text="Rows per Sheet", width=30)
-        rows_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        rows_entry = tk.Entry(rows_frame)
-        rows_entry._variable_name = "rows_per_sheet"  # Store variable name for repopulation
-        rows_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # Store reference to global entry
-        self.rows_per_sheet_entry = rows_entry
-
-        # Significant Figures Row
-        sig_figs_frame = tk.Frame(left_section)
-        sig_figs_frame.pack(fill=tk.X, pady=2)
-
-        # Help button
-        sig_figs_help_btn = tk.Button(sig_figs_frame, text="?", width=2, 
-                                      command=lambda: self.show_help("significant_figures.txt"))
-        sig_figs_help_btn.pack(side=tk.LEFT, padx=(5, 2))
-
-        sig_figs_label = tk.Label(sig_figs_frame, text="Significant Figures", width=30)
-        sig_figs_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        sig_figs_entry = tk.Entry(sig_figs_frame)
-        sig_figs_entry._variable_name = "sig_figs"  # Store variable name for repopulation
-        sig_figs_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # Store reference to global entry
-        self.sig_figs_entry = sig_figs_entry
-
-        # Rounding Tolerance Row
-        tolerance_frame = tk.Frame(left_section)
-        tolerance_frame.pack(fill=tk.X, pady=2)
-
-        # Help button
-        tolerance_help_btn = tk.Button(tolerance_frame, text="?", width=2, 
-                                       command=lambda: self.show_help("rounding_tolerance.txt"))
-        tolerance_help_btn.pack(side=tk.LEFT, padx=(5, 2))
-
-        tolerance_label = tk.Label(tolerance_frame, text="Rounding Tolerance", width=30)
-        tolerance_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        tolerance_entry = tk.Entry(tolerance_frame)
-        tolerance_entry._variable_name = "rounding_tolerance"  # Store variable name for repopulation
-        tolerance_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # Store reference to global entry
-        self.rounding_tolerance_entry = tolerance_entry
-
-        # === RIGHT SECTION: Action Buttons ===
-        
-        # Add title for the right section
-        action_title = tk.Label(right_section, text="ACTIONS", font=("Arial", 9, "bold"), fg="darkgreen")
-        action_title.pack(pady=(10, 5))
-
-        # Color coding method
-        color_frame = tk.Frame(right_section)
-        color_frame.pack(fill=tk.X, pady=5)
-
-        # Help button
-        color_help_btn = tk.Button(color_frame, text="?", width=2, 
-                                   command=lambda: self.show_help("color_coding_method.txt"))
-        color_help_btn.pack(side=tk.LEFT, padx=(5, 2))
-
-        color_label = tk.Label(color_frame, text="Color Coding Method:", width=20)
-        color_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.color_coding_var = tk.StringVar(value="new_red_old_green")
-        color_dropdown = ttk.Combobox(color_frame, textvariable=self.color_coding_var, 
-                                     values=["None (Black)", "new_red_old_green", "new_red", "new_red_and_highlight"], 
-                                     state="readonly", width=20)
-        color_dropdown.pack(side=tk.LEFT, padx=5)
-
-        # Fill mode option
-        fill_mode_frame = tk.Frame(right_section)
-        fill_mode_frame.pack(fill=tk.X, pady=5)
-
-        fill_mode_label = tk.Label(fill_mode_frame, text="New Tags Sheet Fill Mode:", width=20)
-        fill_mode_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.fill_mode_var = tk.StringVar(value="continue_last")
-        fill_mode_dropdown = ttk.Combobox(fill_mode_frame, textvariable=self.fill_mode_var, 
-                                         values=["fill_blanks", "continue_last", "always_new", "ignore"], 
-                                         state="readonly", width=20)
-        fill_mode_dropdown.pack(side=tk.LEFT, padx=5)
-
-        # Update matched tags option
-        update_matched_frame = tk.Frame(right_section)
-        update_matched_frame.pack(fill=tk.X, pady=5)
-
-        update_matched_label = tk.Label(update_matched_frame, text="Update Matched Tags:", width=20)
-        update_matched_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        self.update_matched_var = tk.StringVar(value="update")
-        update_matched_dropdown = ttk.Combobox(update_matched_frame, textvariable=self.update_matched_var, 
-                                               values=["update", "skip"], 
-                                               state="readonly", width=20)
-        update_matched_dropdown.pack(side=tk.LEFT, padx=5)
-
-        # Green highlighting option
-        green_highlight_frame = tk.Frame(right_section)
-        green_highlight_frame.pack(fill=tk.X, pady=5)
-        
-        self.disable_green_highlight_var = tk.BooleanVar(value=False)
-        disable_green_highlight_checkbox = tk.Checkbutton(
-            green_highlight_frame,
-            text="Disable Green Cell Highlighting",
-            variable=self.disable_green_highlight_var,
-            font=("Arial", 9)
-        )
-        disable_green_highlight_checkbox.pack(anchor=tk.W)
-
-        # Add/Update button
-        self.generate_button = tk.Button(right_section, text="Add/Update",
-                  command=self.add_datasheets, font=("Arial", 10, "bold"), 
-                  bg="green", fg="white", padx=20, pady=8, width=12)
-        self.generate_button.pack(pady=5, padx=10)
-
-        # Stop button
-        self.stop_button = tk.Button(right_section, text="Stop",
-                  command=self.set_halt_flag, bg="red", fg="white", state="disabled",
-                  font=("Arial", 10, "bold"), padx=20, pady=8, width=12)
-        self.stop_button.pack(pady=5, padx=10)
-
-        # Add status label
-        self.status_label = tk.Label(destination_container, text="Ready", fg="black", font=("Arial", 9))
-        self.status_label.pack(anchor=tk.W, padx=5, pady=(5,0))
+        # Initialize button references (will be set when first destination tab is created)
+        self.generate_button = None
+        self.stop_button = None
+        self.status_label = None
 
         # Repopulate the entries list after all widgets are created
         self.repopulate_entries_list()
@@ -1822,23 +2240,29 @@ class DatasheetGeneratorApp:
     # region Tab Creation
 
     def init_excel(self):
-        """Initialize Excel only when needed"""
+        """Initialize Excel only when needed. 
+        Now supports multiple open workbooks - will switch to the appropriate one or open it if needed."""
         if self.destination_datasheet:
-            try:
-                # Check if workbook reference is still valid
-                if self.excel_mgr.wb and self.excel_mgr.wb.name:
-                    return
-            except:
-                # Workbook was closed, reset references
-                self.excel_mgr.wb = None
-                self.excel_mgr.app = None
-            
             print("DEBUG: About to open workbook with ExcelManager...")
+            # open_workbook now handles checking if already open and switching to it
             self.excel_mgr.open_workbook(self.destination_datasheet)
-            print("DEBUG: Workbook opened successfully with ExcelManager")
+            print("DEBUG: Workbook opened/switched successfully with ExcelManager")
 
-    def create_coordinates_tab(self, tab, data_source=None, sheet_names=None):
-        print(f"DEBUG: Starting create_coordinates_tab for data_source: {data_source}...")
+    def create_coordinates_tab(self, tab, data_source=None, sheet_names=None, destination=None):
+        print(f"DEBUG: Starting create_coordinates_tab for data_source: {data_source}, destination: {destination}...")
+        
+        # Get current destination if not provided
+        if destination is None:
+            destination = self.get_current_destination()
+            if destination is None:
+                # Create default destination if none exist
+                default_dest = "Default"
+                if default_dest not in self.destinations:
+                    self.add_destination(default_dest, {
+                        'path': '', 'datasheet_coord': '', 'ds_str': '',
+                        'rows_per_sheet': 1, 'sig_figs': 4, 'rounding_tolerance': 1e-2
+                    })
+                destination = default_dest
 
         def get_combo_values():
             """Get combo values for the specific data source"""
@@ -1853,31 +2277,55 @@ class DatasheetGeneratorApp:
                 return {data_source: values}
             return {}
 
-        def add_coordinate(data_source, entry, combo, listbox):
+        def add_coordinate(data_source, entry, combo, listbox, dest):
             coord = entry.get()
             value = combo.get()
             if coord and value:
-                coordinate_values = self.data_sources[data_source]['coordinate_values']
+                # Access coordinate_values per destination
+                if dest not in self.data_sources[data_source]['coordinate_values']:
+                    self.data_sources[data_source]['coordinate_values'][dest] = {}
+                coordinate_values = self.data_sources[data_source]['coordinate_values'][dest]
                 coordinate_values[coord] = value
-                self.data_sources[data_source]['coordinate_values'] = coordinate_values
+                self.data_sources[data_source]['coordinate_values'][dest] = coordinate_values
                 
-                update_listboxes()
+                # Only update the specific listbox that was changed, not all listboxes
+                update_listbox(data_source, listbox, dest)
+                
+                # Update tab color since coordinate map changed
+                self.update_tab_color_for_data_source(data_source)
+                
+                # Clear the entry after adding
+                entry.delete(0, tk.END)
 
-        def remove_coordinate(data_source, listbox):
+        def remove_coordinate(data_source, listbox, dest):
             selected_indices = listbox.curselection()
             if not selected_indices:
                 return
-            coordinate_values = self.data_sources[data_source]['coordinate_values']
+            # Access coordinate_values per destination
+            if dest not in self.data_sources[data_source]['coordinate_values']:
+                self.data_sources[data_source]['coordinate_values'][dest] = {}
+            coordinate_values = self.data_sources[data_source]['coordinate_values'][dest]
             for idx in reversed(selected_indices):
                 coord = listbox.get(idx).split(':')[0].strip()
                 if coord in coordinate_values:
                     del coordinate_values[coord]
-            self.data_sources[data_source]['coordinate_values'] = coordinate_values
-            update_listboxes()
+            self.data_sources[data_source]['coordinate_values'][dest] = coordinate_values
+            # Only update the specific listbox that was changed
+            update_listbox(data_source, listbox, dest)
+            
+            # Update tab color since coordinate map changed
+            self.update_tab_color_for_data_source(data_source)
 
-        def clear_coordinates(data_source, listbox):
-            self.data_sources[data_source]['coordinate_values'] = {}
-            update_listboxes()
+        def clear_coordinates(data_source, listbox, dest):
+            # Access coordinate_values per destination
+            if dest not in self.data_sources[data_source]['coordinate_values']:
+                self.data_sources[data_source]['coordinate_values'][dest] = {}
+            self.data_sources[data_source]['coordinate_values'][dest] = {}
+            # Only update the specific listbox that was changed
+            update_listbox(data_source, listbox, dest)
+            
+            # Update tab color since coordinate map changed
+            self.update_tab_color_for_data_source(data_source)
 
         def update_coordinate_display(full_selection, current_selection):
             """Callback function for centralized Excel selection monitoring - only updates coordinate entry"""
@@ -1893,14 +2341,17 @@ class DatasheetGeneratorApp:
         # Store callback reference for cleanup
         tab._coordinate_callback = update_coordinate_display
 
-        def update_listbox(data_source, listbox):
+        def update_listbox(data_source, listbox, dest):
             """Update a specific data source's listbox using centralized system"""
             try:
                 # Check if the widget still exists
                 if not listbox.winfo_exists():
                     return
                 listbox.delete(0, tk.END)
-                coordinate_values = self.data_sources[data_source]['coordinate_values']
+                # Access coordinate_values per destination
+                if dest not in self.data_sources[data_source]['coordinate_values']:
+                    self.data_sources[data_source]['coordinate_values'][dest] = {}
+                coordinate_values = self.data_sources[data_source]['coordinate_values'][dest]
                 for key, value in coordinate_values.items():
                     # Add placeholder for conversion details
                     coord_display = f"{key}: {value}"
@@ -1917,7 +2368,10 @@ class DatasheetGeneratorApp:
                 return
 
         def update_listboxes():
-            """Update all listboxes for all data sources"""
+            """Update all listboxes for all data sources using current destination"""
+            current_dest = self.get_current_destination()
+            if not current_dest:
+                current_dest = destination  # Fallback to original destination
             for data_source in self.get_all_data_sources():
                 # Get listbox reference from data_source_widgets
                 listbox = self.data_source_widgets.get(data_source, {}).get('listbox')
@@ -1925,7 +2379,7 @@ class DatasheetGeneratorApp:
                     try:
                         # Check if the widget still exists before updating
                         if listbox.winfo_exists():
-                            update_listbox(data_source, listbox)
+                            update_listbox(data_source, listbox, current_dest)
                     except tk.TclError:
                         # Widget was destroyed, skip updating
                         print(f"Warning: Could not update listbox for {data_source} - widget may have been destroyed")
@@ -2156,16 +2610,40 @@ class DatasheetGeneratorApp:
                 self.data_source_widgets[current_data_source] = {}
             self.data_source_widgets[current_data_source]['listbox'] = listbox
 
-            # Buttons
+            # Buttons - use current destination dynamically instead of capturing it
+            def add_coord_wrapper():
+                current_dest = self.get_current_destination()
+                if not current_dest:
+                    current_dest = destination  # Fallback to original destination
+                add_coordinate(current_data_source, coord_entry, combo, listbox, current_dest)
+            
+            def remove_coord_wrapper():
+                current_dest = self.get_current_destination()
+                if not current_dest:
+                    current_dest = destination  # Fallback to original destination
+                remove_coordinate(current_data_source, listbox, current_dest)
+            
+            def clear_coord_wrapper():
+                current_dest = self.get_current_destination()
+                if not current_dest:
+                    current_dest = destination  # Fallback to original destination
+                clear_coordinates(current_data_source, listbox, current_dest)
+            
             ttk.Button(btn_frame, text=f"Add",
-                       command=lambda dt=current_data_source, e=coord_entry, c=combo, l=listbox: add_coordinate(dt, e, c, l)).pack(side="left", padx=2)
+                       command=add_coord_wrapper).pack(side="left", padx=2)
             ttk.Button(btn_frame, text="Remove",
-                       command=lambda dt=current_data_source, l=listbox: remove_coordinate(dt, l)).pack(side="left", padx=2)
+                       command=remove_coord_wrapper).pack(side="left", padx=2)
             ttk.Button(btn_frame, text="Clear All",
-                       command=lambda dt=current_data_source, l=listbox: clear_coordinates(dt, l)).pack(side="left", padx=2)
+                       command=clear_coord_wrapper).pack(side="left", padx=2)
             
             # AutoMap button with min score entry
-            def automap_coordinate(dt=current_data_source, combo_box=combo):                    # Get min score from right panel
+            def automap_coordinate(dt=current_data_source, combo_box=combo):
+                # Get current destination dynamically
+                current_dest = self.get_current_destination()
+                if not current_dest:
+                    current_dest = destination  # Fallback to original destination
+                
+                # Get min score from right panel
                 min_score = float(min_score_var_right.get().strip())
 
                 full_selection = xw.apps.active.selection.address
@@ -2181,11 +2659,11 @@ class DatasheetGeneratorApp:
                 if ',' in clean_selection:
                     # Non-contiguous selection - process multiple ranges
                     print(f"DEBUG: Non-contiguous selection: {clean_selection}")
-                    self.automap_noncontiguous(dt, full_selection, combo_box, coord_entry, listbox, min_score)
+                    self.automap_noncontiguous(dt, full_selection, combo_box, coord_entry, listbox, min_score, current_dest)
                 elif ':' in clean_selection:
                     print(f"DEBUG: Single contiguous range: {clean_selection}")
                     # Single contiguous range - iterate through cells
-                    self.automap_range(dt, full_selection, combo_box, coord_entry, listbox, min_score)
+                    self.automap_range(dt, full_selection, combo_box, coord_entry, listbox, min_score, current_dest)
                 else:
                     # Single cell - perform mapping
                     print(f"DEBUG: Single cell: {clean_selection}")
@@ -2194,7 +2672,7 @@ class DatasheetGeneratorApp:
                         best_match, score, header = self.auto_map_coordinate_semantic(dt, current_coord, min_score)
                         if best_match:
                             combo_box.set(best_match)
-                            add_coordinate(dt, coord_entry, combo_box, listbox)
+                            add_coordinate(dt, coord_entry, combo_box, listbox, current_dest)
                             header_display = f"'{header}'" if header else "None"
                             messagebox.showinfo("AutoMap Result", 
                                 f"Successfully mapped {current_coord} to '{best_match}'\nSimilarity Score: {score:.3f}\nHeader: {header_display}")
@@ -2976,6 +3454,8 @@ class DatasheetGeneratorApp:
         """Dynamic version that works with any data sources"""
         print("Generating Coordinate-Value Data")
         self.tag_cell_values = {}  # 'a1':'LINE', 'a2':'PID' ...
+        # Clear tag_cell_values_by_destination to ensure only primary data source data is used
+        self.tag_cell_values_by_destination = {}
         
         def process_coordinate_value(coordinate, raw_value, data_source):
             """Helper function to process a coordinate value with conversions and combinations"""
@@ -3085,28 +3565,45 @@ class DatasheetGeneratorApp:
                 if continue_flag:
                     continue
 
-                # Process coordinates for the primary data source only
-                data = {}
-                
-                # Process only the primary data source coordinates
+                # Process coordinates for each destination separately
+                # tag_cell_values will be structured as {destination: {tag: {coord: value}}}
                 primary_data_source = self.get_primary_data_source()
                 data_source_data = self.data_sources[primary_data_source]['data']
-                coordinate_values = self.data_sources[primary_data_source]['coordinate_values']
                 
-                for coordinate, value in coordinate_values.items():
-                    print(f'{primary_data_source} tag {tag}, value {value}, coord {coordinate}')
-                    raw_value = data_source_data[tag].get(value) # Use .get() for safety
-                    processed_value = process_coordinate_value(coordinate, raw_value, primary_data_source)
-                    data[coordinate] = processed_value
-                    if processed_value is None:
-                        print(f"  Warning: Key '{value}' not found in {primary_data_source} for tag '{tag}'. Skipping coordinate '{coordinate}'.")
+                # Process for each destination
+                for destination in self.get_all_destinations():
+                    if destination not in self.tag_cell_values_by_destination:
+                        self.tag_cell_values_by_destination[destination] = {}
+                    
+                    data = {}
+                    
+                    # Access coordinate_values per destination
+                    if destination not in self.data_sources[primary_data_source]['coordinate_values']:
+                        self.data_sources[primary_data_source]['coordinate_values'][destination] = {}
+                    coordinate_values = self.data_sources[primary_data_source]['coordinate_values'][destination]
+                    
+                    for coordinate, value in coordinate_values.items():
+                        print(f'{primary_data_source} tag {tag}, value {value}, coord {coordinate}, destination {destination}')
+                        raw_value = data_source_data[tag].get(value) # Use .get() for safety
+                        processed_value = process_coordinate_value(coordinate, raw_value, primary_data_source)
+                        data[coordinate] = processed_value
+                        if processed_value is None:
+                            print(f"  Warning: Key '{value}' not found in {primary_data_source} for tag '{tag}'. Skipping coordinate '{coordinate}'.")
 
-                # Apply combinations to the data
-                apply_combinations(data, primary_data_source)
+                    # Apply combinations to the data
+                    apply_combinations(data, primary_data_source)
 
-                self.tag_cell_values[tag] = data
+                    self.tag_cell_values_by_destination[destination][tag] = data
+                
+                # Also maintain legacy tag_cell_values for backward compatibility (use first destination)
+                # This will be used if destinations aren't being processed separately
+                if not hasattr(self, 'tag_cell_values'):
+                    self.tag_cell_values = {}
+                if self.get_all_destinations():
+                    first_dest = self.get_all_destinations()[0]
+                    self.tag_cell_values[tag] = self.tag_cell_values_by_destination[first_dest][tag]
 
-        print("Coordinate Values generated:", self.tag_cell_values)
+        print("Coordinate Values generated per destination:", self.tag_cell_values_by_destination)
     
 
     def check_halt_flag(self):
@@ -3117,17 +3614,89 @@ class DatasheetGeneratorApp:
         """Reset the halt flag to False"""
         self.halt_flag = False
     
+    def on_destination_tab_changed(self, event=None):
+        """Update button references and coordinates listbox when destination tab changes.
+        Also switches to the appropriate workbook if it's already open."""
+        current_destination = self.get_current_destination()
+        if current_destination and current_destination in self.destination_widgets:
+            widgets = self.destination_widgets[current_destination]
+            self.generate_button = widgets.get('generate_button')
+            self.stop_button = widgets.get('stop_button')
+            self.status_label = widgets.get('status_label')
+        
+        # Switch to the workbook for this destination if it exists
+        if current_destination:
+            dest_path, _, _, _, _, _ = self.get_destination_ui_values(current_destination)
+            if dest_path:
+                self.destination_datasheet = dest_path
+                # Try to switch to the workbook if it's already open
+                # This will switch if open, or do nothing if not open yet (will open when needed)
+                try:
+                    normalized_path = os.path.normpath(os.path.abspath(dest_path)).lower()
+                    if normalized_path in self.excel_mgr.open_workbooks:
+                        # Switch to this workbook
+                        workbook_info = self.excel_mgr.open_workbooks[normalized_path]
+                        try:
+                            _ = workbook_info['wb'].name  # Verify it's still valid
+                            print(f"DEBUG: Switching to workbook for destination: {current_destination}")
+                            self.excel_mgr.wb = workbook_info['wb']
+                            self.excel_mgr.app = workbook_info['app']
+                            self.excel_mgr.is_dirty = workbook_info['is_dirty']
+                            self.excel_mgr.original_path = workbook_info['original_path']
+                            self.excel_mgr.temp_path = workbook_info['temp_path']
+                            print("DEBUG: Switched to destination workbook")
+                        except Exception as e:
+                            print(f"DEBUG: Workbook for destination {current_destination} is no longer valid: {e}")
+                            # Remove invalid workbook from cache
+                            del self.excel_mgr.open_workbooks[normalized_path]
+                except Exception as e:
+                    print(f"DEBUG: Error switching to destination workbook: {e}")
+        
+        # Update coordinates listbox for the primary data source to show coordinates for the new destination
+        primary_data_source = self.get_primary_data_source()
+        if primary_data_source:
+            listbox = self.data_source_widgets.get(primary_data_source, {}).get('listbox')
+            if listbox:
+                try:
+                    if listbox.winfo_exists():
+                        self.update_single_listbox(primary_data_source, listbox, current_destination)
+                        print(f"DEBUG: Updated coordinates listbox for {primary_data_source} to show destination {current_destination}")
+                except tk.TclError:
+                    print(f"Warning: Could not update listbox for {primary_data_source} - widget may have been destroyed")
+        
+        # Update tab colors for all data sources based on the new destination
+        self.update_all_tab_colors()
+    
+    def get_current_destination_buttons(self):
+        """Get the buttons and status label for the current destination"""
+        current_destination = self.get_current_destination()
+        if current_destination and current_destination in self.destination_widgets:
+            widgets = self.destination_widgets[current_destination]
+            return (
+                widgets.get('generate_button'),
+                widgets.get('stop_button'),
+                widgets.get('status_label')
+            )
+        # Fallback to instance variables if available
+        return (
+            getattr(self, 'generate_button', None),
+            getattr(self, 'stop_button', None),
+            getattr(self, 'status_label', None)
+        )
+    
     def set_halt_flag(self):
         """Set the halt flag to True to stop the process"""
         self.halt_flag = True
         print("Halt flag set - process will stop at next opportunity")
-        if hasattr(self, 'status_label'):
-            self.status_label.config(text="Stopping...", fg="orange")
+        _, _, status_label = self.get_current_destination_buttons()
+        if status_label:
+            status_label.config(text="Stopping...", fg="orange")
     
     def update_status(self, message, color="black"):
         """Update the status label if it exists"""
-        if hasattr(self, 'status_label'):
-            self.status_label.config(text=message, fg=color)
+        _, _, status_label = self.get_current_destination_buttons()
+        if status_label:
+            status_label.config(text=message, fg=color)
     
     def add_datasheets(self):
         print('assigning tag coordinates')
@@ -3139,15 +3708,7 @@ class DatasheetGeneratorApp:
         # VALIDATION: Check for vital entries before proceeding
         missing_fields = []
         
-        # Check destination datasheet
-        if not self.destination_datasheet:
-            missing_fields.append("Datasheets (Destination)")
-        
-        # Get entry values to check required fields
-        self.ensure_global_entries_exist()
-        entry_values = self.get_entry_values()
-        
-        # Get primary data source info to determine what's required
+        # Get primary data source info
         primary_data_source = self.get_primary_data_source()
         try:
             primary_source_sheet_name, primary_top_tag, primary_partial_match = self.get_data_source_ui_values(primary_data_source)
@@ -3157,55 +3718,39 @@ class DatasheetGeneratorApp:
             primary_top_tag = ""
             primary_partial_match = False
         
-        # Check required global entries (always required)
-        always_required = {
-            'rows_per_sheet': 'Rows per Sheet',
-            'sig_figs': 'Significant Figures',
-            'rounding_tolerance': 'Rounding Tolerance'
-        }
-        
-        for field_key, field_name in always_required.items():
-            value = entry_values.get(field_key, '').strip()
-            if not value:
-                missing_fields.append(field_name)
-        
-        # Datasheet Coordinate is only required if creating new sheets (source sheet is provided)
-        if primary_source_sheet_name and primary_source_sheet_name.strip():
-            datasheet_coord = entry_values.get('datasheet_coord', '').strip()
-            if not datasheet_coord:
-                missing_fields.append("Datasheet Coordinate (required when creating new sheets)")
-        
         # Check top tag for primary data source
         if not primary_top_tag or not primary_top_tag.strip():
             missing_fields.append(f"Top Tag for {primary_data_source}")
         
+        # Get the current destination (only process the selected one)
+        current_destination = self.get_current_destination()
+        if not current_destination:
+            missing_fields.append("No destination selected - please select a destination tab")
+        
+        # Validate the current destination
+        destination_validation_errors = []
+        if current_destination:
+            dest_path, dest_coord, dest_prefix, dest_rows, dest_sig_figs, dest_tolerance = self.get_destination_ui_values(current_destination)
+            
+            # Check destination path
+            if not dest_path:
+                destination_validation_errors.append(f"Destination '{current_destination}': Missing datasheet path")
+            
+            # Check rows_per_sheet, sig_figs, tolerance (should have defaults, but check anyway)
+            if dest_rows < 1:
+                destination_validation_errors.append(f"Destination '{current_destination}': Invalid rows_per_sheet")
+        
         # If any required fields are missing, show error and cancel
-        if missing_fields:
+        if missing_fields or destination_validation_errors:
             self.update_status("Missing required fields", "red")
             error_message = "Please fill in the following required fields before proceeding:\n\n"
-            error_message += "\n".join(f"• {field}" for field in missing_fields)
+            if missing_fields:
+                error_message += "\n".join(f"• {field}" for field in missing_fields)
+            if destination_validation_errors:
+                error_message += "\n".join(f"• {field}" for field in destination_validation_errors)
             error_message += "\n\nThe Add/Update operation has been cancelled."
             messagebox.showerror("Missing Required Fields", error_message)
             return  # Cancel the operation
-        
-        # VALIDATION: Check if source sheet exists in the workbook
-        if primary_source_sheet_name and primary_source_sheet_name.strip():
-            try:
-                # Get available sheet names from the destination workbook
-                available_sheets = self.get_sheet_names()
-                if primary_source_sheet_name not in available_sheets:
-                    self.update_status("Source sheet not found", "red")
-                    error_message = f"The source sheet '{primary_source_sheet_name}' does not exist in the workbook.\n\n"
-                    error_message += f"Available sheets are:\n"
-                    error_message += "\n".join(f"• {sheet}" for sheet in available_sheets)
-                    error_message += f"\n\nPlease select a valid source sheet name before proceeding.\n\nThe Add/Update operation has been cancelled."
-                    messagebox.showerror("Source Sheet Not Found", error_message)
-                    return  # Cancel the operation
-            except Exception as e:
-                self.update_status("Error validating source sheet", "red")
-                error_message = f"Error validating source sheet '{primary_source_sheet_name}': {str(e)}\n\nThe Add/Update operation has been cancelled."
-                messagebox.showerror("Validation Error", error_message)
-                return  # Cancel the operation
         
         self.assign_value_coordinate_to_tag()
         print("Adding/Updating Datasheets")
@@ -3215,49 +3760,56 @@ class DatasheetGeneratorApp:
         self.reset_halt_flag()
         self.is_processing = True
         
-        # Enable stop button and disable generate button
-        if hasattr(self, 'stop_button'):
-            self.stop_button.config(state="normal")
-        if hasattr(self, 'generate_button'):
-            self.generate_button.config(state="disabled")
+        # Enable stop button and disable generate button for current destination
+        generate_button, stop_button, _ = self.get_current_destination_buttons()
+        if stop_button:
+            stop_button.config(state="normal")
+        if generate_button:
+            generate_button.config(state="disabled")
         
         try:
-            # Force reinitialization of Excel connection
+            # Get the primary data source
+            primary_data_source = self.get_primary_data_source()
+            
+            # Get the current destination (only process the selected one)
+            current_destination = self.get_current_destination()
+            if not current_destination:
+                self.update_status("No destination selected", "red")
+                messagebox.showerror("Error", "Please select a destination tab before running Add/Update.")
+                return
+            
+            # Get destination-specific values
+            dest_path, dest_coord, dest_prefix, dest_rows, dest_sig_figs, dest_tolerance = self.get_destination_ui_values(current_destination)
+            
+            # Set destination_datasheet before initializing Excel (so init_excel can check if it's already open)
+            if dest_path:
+                self.destination_datasheet = dest_path
+            
+            # Initialize Excel connection (will reuse if already open for this path)
             self.init_excel()
             print('Excel initialized')
             # Additional check for valid workbook reference
             if not self.excel_mgr.wb:
                 raise Exception("Excel workbook not properly initialized")
-
-            # Get the primary data source
-            primary_data_source = self.get_primary_data_source()
             
-            # STEP 1: Update GLOBAL class attributes from global UI entries
-            # Ensure global entries are available
-            self.ensure_global_entries_exist()
-            entry_values = self.get_entry_values()
-            print(f'DEBUG: Raw entry values: {entry_values}')
-            
-            self.datasheet_coord = entry_values.get('datasheet_coord', self.datasheet_coord)
-            self.ds_str = entry_values.get('ds_str', self.ds_str)
-            self.rows_per_sheet = int(entry_values.get('rows_per_sheet', self.rows_per_sheet))
-            self.sig_figs = int(entry_values.get('sig_figs', self.sig_figs))
-            self.rounding_tolerance = float(entry_values.get('rounding_tolerance', self.rounding_tolerance))
-            
-            # STEP 2: Get data_source SPECIFIC values directly from UI entries
+            # STEP 1: Get data_source SPECIFIC values directly from UI entries
             primary_source_sheet_name, primary_top_tag, primary_partial_match = self.get_data_source_ui_values(primary_data_source)
             print(f'DEBUG: data source UI values for {primary_data_source}: source_sheet={primary_source_sheet_name}, top_tag={primary_top_tag}, partial_match={primary_partial_match}')
             
             # Store the source sheet name for the report
             self.last_used_source_sheet = primary_source_sheet_name
+            # Store destination-specific values for the report
+            self.last_used_rows_per_sheet = dest_rows
+            self.last_used_datasheet_prefix = dest_prefix
             
-            print(f'Updated values before add_update_datasheets:')
-            print(f'  GLOBAL values:')
-            print(f'    datasheet_coord: {self.datasheet_coord}')
-            print(f'    ds_str: {self.ds_str}')
-            print(f'    rows_per_sheet: {self.rows_per_sheet}')
-            print(f'    sig_figs: {self.sig_figs}')
-            print(f'    rounding_tolerance: {self.rounding_tolerance}')
+            print(f'Processing destination: {current_destination}')
+            print(f'  Destination values:')
+            print(f'    path: {dest_path}')
+            print(f'    datasheet_coord: {dest_coord}')
+            print(f'    ds_str: {dest_prefix}')
+            print(f'    rows_per_sheet: {dest_rows}')
+            print(f'    sig_figs: {dest_sig_figs}')
+            print(f'    rounding_tolerance: {dest_tolerance}')
             print(f'  data_source SPECIFIC values ({primary_data_source}):')
             print(f'    top_tag: {primary_top_tag}')
             print(f'    source_sheet_name: {primary_source_sheet_name}')
@@ -3266,14 +3818,21 @@ class DatasheetGeneratorApp:
             warning_messages = []
             
             # Check if source sheet name starts with prefix
-            if primary_source_sheet_name and self.ds_str and primary_source_sheet_name.startswith(self.ds_str):
+            if primary_source_sheet_name and dest_prefix and primary_source_sheet_name.startswith(dest_prefix):
                 warning_messages.append(
-                    f"⚠️ Source sheet '{primary_source_sheet_name}' starts with prefix '{self.ds_str}'\n"
+                    f"⚠️ Source sheet '{primary_source_sheet_name}' starts with prefix '{dest_prefix}'\n"
                     f"   This may cause the source sheet to be scanned as a datasheet."
                 )
             
+            # Get tag_cell_values for this destination
+            if hasattr(self, 'tag_cell_values_by_destination') and current_destination in self.tag_cell_values_by_destination:
+                destination_tag_cell_values = self.tag_cell_values_by_destination[current_destination]
+            else:
+                # Fallback to legacy tag_cell_values
+                destination_tag_cell_values = self.tag_cell_values
+            
             # Check if rows_per_sheet = 1 and any tag matches source sheet name
-            if self.rows_per_sheet == 1 and primary_source_sheet_name and primary_source_sheet_name in self.tag_cell_values:
+            if dest_rows == 1 and primary_source_sheet_name and primary_source_sheet_name in destination_tag_cell_values:
                 warning_messages.append(
                     f"⚠️ INFO: Tag name '{primary_source_sheet_name}' matches source sheet name.\n"
                     f"   With rows_per_sheet=1, this will USE your existing source sheet directly.\n"
@@ -3307,17 +3866,20 @@ class DatasheetGeneratorApp:
             print('color_option', color_option)
             print('partial_match', primary_partial_match)
             
+            # Process only the current destination
             self.new_sheets, self.generation_statistics = add_update_datasheets(self.excel_mgr.wb, primary_source_sheet_name,
-                                            self.tag_cell_values, self.datasheet_coord,
-                                            self.ds_str, rows_per_sheet=self.rows_per_sheet,
+                                            destination_tag_cell_values, dest_coord,
+                                            dest_prefix, rows_per_sheet=dest_rows,
                                             key_coordinate=primary_top_tag,
-                                            sig_figs=self.sig_figs, # Pass sig_figs
-                                            tolerance=self.rounding_tolerance, # Pass tolerance
+                                            sig_figs=dest_sig_figs, # Pass sig_figs
+                                            tolerance=dest_tolerance, # Pass tolerance
                                             halt_callback=self.check_halt_flag, # Pass halt callback
                                             cell_update_option=color_option, # Pass color coding option
                                             partial_match=primary_partial_match, # Pass partial match option
                                             disable_green_highlight=self.disable_green_highlight_var.get(), # Pass green highlighting option
-                                            fill_mode=self.fill_mode_var.get()) # Pass fill mode option
+                                            fill_mode=self.fill_mode_var.get(), # Pass fill mode option
+                                            append_suffix_to_green=self.append_suffix_to_green_var.get(), # Pass append suffix option
+                                            clear_highlighting_on_match=self.clear_highlighting_on_match_var.get()) # Pass clear highlighting option
             self.excel_mgr.mark_as_modified()
             
             if self.halt_flag:
@@ -3346,11 +3908,12 @@ class DatasheetGeneratorApp:
         finally:
             self.is_processing = False
             
-            # Disable stop button and enable generate button
-            if hasattr(self, 'stop_button'):
-                self.stop_button.config(state="disabled")
-            if hasattr(self, 'generate_button'):
-                self.generate_button.config(state="normal")
+            # Disable stop button and enable generate button for current destination
+            generate_button, stop_button, _ = self.get_current_destination_buttons()
+            if stop_button:
+                stop_button.config(state="disabled")
+            if generate_button:
+                generate_button.config(state="normal")
 
     # endregion
 
@@ -3370,21 +3933,18 @@ class DatasheetGeneratorApp:
                 # Clear data sources (without confirmation dialogs)
                 self.data_sources.clear()
                 self.data_source_widgets.clear()
+                if hasattr(self, 'data_source_ui_entries'):
+                    self.data_source_ui_entries.clear()
                 
-                # Reset Excel manager
-                if hasattr(self.excel_mgr, 'wb') and self.excel_mgr.wb:
-                    try:
-                        self.excel_mgr.wb.close()
-                    except:
-                        pass
-                    self.excel_mgr.wb = None
+                # Clear destinations (without confirmation dialogs)
+                self.destinations.clear()
+                self.destination_widgets.clear()
                 
-                if hasattr(self.excel_mgr, 'app') and self.excel_mgr.app:
-                    try:
-                        self.excel_mgr.app.quit()
-                    except:
-                        pass
-                    self.excel_mgr.app = None
+                # Reset Excel manager - close all open workbooks
+                try:
+                    self.excel_mgr.cleanup(close_all=True)
+                except Exception as e:
+                    print(f"Warning: Error closing workbooks in new_project: {e}")
                 
                 # Reset other attributes
                 self.new_sheets = []
@@ -3398,6 +3958,9 @@ class DatasheetGeneratorApp:
                 # Clean up entries and refresh UI
                 self.cleanup_entries()
                 self.refresh_data_sources_notebook()
+                # Refresh destinations notebook to remove all tabs
+                if hasattr(self, 'destinations_notebook'):
+                    self.refresh_destinations_notebook()
                 
                 messagebox.showinfo("New Project", "New project created successfully.")
                 
@@ -3449,13 +4012,38 @@ class DatasheetGeneratorApp:
                         # Update the existing data source configuration
                         for key, value in config.items():
                             self.data_sources[data_source][key] = value
-                    
+            
+            # Load destinations configuration
+            if 'destinations' in settings_data:
+                for destination, config in settings_data['destinations'].items():
+                    # Create the destination if it doesn't exist
+                    if destination not in self.destinations:
+                        self.add_destination(destination, config)
+                    else:
+                        # Update the existing destination configuration
+                        for key, value in config.items():
+                            self.destinations[destination][key] = value
+            else:
+                # If no destinations in saved file, create a default one for backward compatibility
+                if not self.destinations:
+                    default_dest = "Default"
+                    self.add_destination(default_dest, {
+                        'path': '', 'datasheet_coord': '', 'ds_str': '',
+                        'rows_per_sheet': 1, 'sig_figs': 4, 'rounding_tolerance': 1e-2
+                    })
+            
+            # Initialize coordinate maps for all data source * destination combinations
+            # This ensures coordinate maps exist even if they weren't in the saved file
+            self.initialize_coordinate_maps_for_all_combinations()
             
             # Refresh the UI to reflect loaded settings
             # Clear the entries list since widgets will be recreated
             self.entries = []
             # First refresh the data sources notebook to show any new data sources
             self.refresh_data_sources_notebook()
+            # Refresh destinations notebook to show any new destinations
+            if hasattr(self, 'destinations_notebook'):
+                self.refresh_destinations_notebook()
             # Then refresh data source frames in case new data sources were loaded
             self.refresh_data_source_frames()
             # Finally refresh all tab content to show the loaded data
@@ -3476,6 +4064,31 @@ class DatasheetGeneratorApp:
                     partial_match = config.get('partial_match', False)
                     self.set_data_source_ui_values(data_source, source_sheet_name, top_tag, partial_match)
             
+            # Set destination specific UI entries after UI is refreshed
+            if 'destinations' in settings_data:
+                for destination, config in settings_data['destinations'].items():
+                    # Update destination UI entries if they exist
+                    if destination in self.destination_widgets:
+                        widgets = self.destination_widgets[destination]
+                        if 'datasheet_entry' in widgets:
+                            widgets['datasheet_entry'].delete(0, tk.END)
+                            widgets['datasheet_entry'].insert(0, config.get('path', ''))
+                        if 'datasheet_coord_entry' in widgets:
+                            widgets['datasheet_coord_entry'].delete(0, tk.END)
+                            widgets['datasheet_coord_entry'].insert(0, config.get('datasheet_coord', ''))
+                        if 'ds_str_entry' in widgets:
+                            widgets['ds_str_entry'].delete(0, tk.END)
+                            widgets['ds_str_entry'].insert(0, config.get('ds_str', ''))
+                        if 'rows_per_sheet_entry' in widgets:
+                            widgets['rows_per_sheet_entry'].delete(0, tk.END)
+                            widgets['rows_per_sheet_entry'].insert(0, str(config.get('rows_per_sheet', 1)))
+                        if 'sig_figs_entry' in widgets:
+                            widgets['sig_figs_entry'].delete(0, tk.END)
+                            widgets['sig_figs_entry'].insert(0, str(config.get('sig_figs', 4)))
+                        if 'rounding_tolerance_entry' in widgets:
+                            widgets['rounding_tolerance_entry'].delete(0, tk.END)
+                            widgets['rounding_tolerance_entry'].insert(0, str(config.get('rounding_tolerance', 1e-2)))
+            
             # Update the current settings file and window title
             self.current_settings_file = file_path
             self.save_last_settings_file_path(file_path)
@@ -3492,6 +4105,200 @@ class DatasheetGeneratorApp:
             print(f"Detailed error: {e}")
             import traceback
             traceback.print_exc()
+
+    def migrate_to_multi_destination(self):
+        """Migrate from old single-destination format to new multi-destination format"""
+        try:
+            # Check if migration is needed
+            migration_needed = False
+            migration_summary = []
+            
+            # Check if any data source has coordinate_values in old format (flat dict, not nested by destination)
+            for data_source in self.get_all_data_sources():
+                coord_vals = self.data_sources[data_source].get('coordinate_values', {})
+                
+                # Check if coordinate_values is a flat dict (old format)
+                # New format would have coordinate_values[destination] = {...}
+                if coord_vals and isinstance(coord_vals, dict):
+                    # Check if it's old format: all keys are coordinate strings (like 'A1', 'B2') not destination names
+                    # This is a heuristic - if we have destinations and coord_vals doesn't match that structure, it's old format
+                    has_destinations = len(self.get_all_destinations()) > 0
+                    if has_destinations:
+                        # Check if any key in coord_vals matches a destination name
+                        destinations = self.get_all_destinations()
+                        is_nested = any(dest in coord_vals for dest in destinations)
+                        if not is_nested and coord_vals:
+                            # Likely old format - check if keys look like coordinates (A1, B2, etc.)
+                            sample_key = list(coord_vals.keys())[0] if coord_vals else None
+                            if sample_key and (len(sample_key) <= 4 and sample_key[0].isalpha()):
+                                migration_needed = True
+                                migration_summary.append(f"Data source '{data_source}': coordinate_values in old format")
+                    else:
+                        # No destinations exist, but coordinate_values exist - likely old format
+                        if coord_vals:
+                            sample_key = list(coord_vals.keys())[0] if coord_vals else None
+                            if sample_key and (len(sample_key) <= 4 and sample_key[0].isalpha()):
+                                migration_needed = True
+                                migration_summary.append(f"Data source '{data_source}': coordinate_values in old format")
+            
+            # Check if global destination settings exist (old format)
+            global_settings = {}
+            if hasattr(self, 'datasheet_coord_entry') and self.datasheet_coord_entry:
+                try:
+                    coord_val = self.datasheet_coord_entry.get().strip()
+                    if coord_val:
+                        global_settings['datasheet_coord'] = coord_val
+                        migration_needed = True
+                        migration_summary.append("Global datasheet_coord found")
+                except:
+                    pass
+            
+            if hasattr(self, 'ds_str_entry') and self.ds_str_entry:
+                try:
+                    prefix_val = self.ds_str_entry.get().strip()
+                    if prefix_val:
+                        global_settings['ds_str'] = prefix_val
+                        migration_needed = True
+                        migration_summary.append("Global datasheet prefix found")
+                except:
+                    pass
+            
+            if hasattr(self, 'rows_per_sheet_entry') and self.rows_per_sheet_entry:
+                try:
+                    rows_val = self.rows_per_sheet_entry.get().strip()
+                    if rows_val:
+                        global_settings['rows_per_sheet'] = int(rows_val) if rows_val.isdigit() else 1
+                        migration_needed = True
+                        migration_summary.append("Global rows_per_sheet found")
+                except:
+                    pass
+            
+            if hasattr(self, 'sig_figs_entry') and self.sig_figs_entry:
+                try:
+                    sig_figs_val = self.sig_figs_entry.get().strip()
+                    if sig_figs_val:
+                        global_settings['sig_figs'] = int(sig_figs_val) if sig_figs_val.isdigit() else 4
+                        migration_needed = True
+                        migration_summary.append("Global significant figures found")
+                except:
+                    pass
+            
+            if hasattr(self, 'rounding_tolerance_entry') and self.rounding_tolerance_entry:
+                try:
+                    tolerance_val = self.rounding_tolerance_entry.get().strip()
+                    if tolerance_val:
+                        global_settings['rounding_tolerance'] = float(tolerance_val) if tolerance_val.replace('.', '').replace('-', '').isdigit() else 1e-2
+                        migration_needed = True
+                        migration_summary.append("Global rounding tolerance found")
+                except:
+                    pass
+            
+            if hasattr(self, 'datasheet_entry') and self.datasheet_entry:
+                try:
+                    path_val = self.datasheet_entry.get().strip()
+                    if path_val:
+                        global_settings['path'] = path_val
+                        migration_needed = True
+                        migration_summary.append("Global destination path found")
+                except:
+                    pass
+            
+            if not migration_needed:
+                messagebox.showinfo("Migration", "No migration needed. Your data is already in the new multi-destination format.")
+                return
+            
+            # Show confirmation dialog
+            summary_text = "The following items will be migrated:\n\n" + "\n".join(f"  • {item}" for item in migration_summary)
+            summary_text += "\n\nThis will:\n"
+            summary_text += "  1. Create a 'Default' destination if none exists\n"
+            summary_text += "  2. Migrate coordinate_values to per-destination format\n"
+            summary_text += "  3. Migrate global destination settings to the Default destination\n"
+            summary_text += "\nDo you want to proceed?"
+            
+            proceed = messagebox.askyesno("Migration to Multi-Destination Format", summary_text, icon='question')
+            if not proceed:
+                return
+            
+            # Perform migration
+            migrated_items = []
+            
+            # Step 1: Ensure we have at least one destination
+            default_dest = "Default"
+            if default_dest not in self.destinations:
+                self.add_destination(default_dest, {
+                    'path': '',
+                    'datasheet_coord': '',
+                    'ds_str': '',
+                    'rows_per_sheet': 1,
+                    'sig_figs': 4,
+                    'rounding_tolerance': 1e-2
+                })
+                migrated_items.append(f"Created '{default_dest}' destination")
+            
+            # Step 2: Migrate global settings to default destination
+            if global_settings:
+                for key, value in global_settings.items():
+                    if key in self.destinations[default_dest]:
+                        old_val = self.destinations[default_dest][key]
+                        self.destinations[default_dest][key] = value
+                        migrated_items.append(f"Migrated global {key}: '{old_val}' -> '{value}'")
+            
+            # Step 3: Migrate coordinate_values for each data source
+            for data_source in self.get_all_data_sources():
+                coord_vals = self.data_sources[data_source].get('coordinate_values', {})
+                
+                if coord_vals and isinstance(coord_vals, dict):
+                    # Check if it's old format (flat dict with coordinate keys)
+                    destinations = self.get_all_destinations()
+                    is_nested = any(dest in coord_vals for dest in destinations)
+                    
+                    if not is_nested and coord_vals:
+                        # Old format - migrate to new format
+                        old_coord_count = len(coord_vals)
+                        # Convert to nested format
+                        self.data_sources[data_source]['coordinate_values'] = {
+                            default_dest: coord_vals.copy()
+                        }
+                        migrated_items.append(f"Data source '{data_source}': Migrated {old_coord_count} coordinate mappings to '{default_dest}' destination")
+            
+            # Step 4: Refresh UI to show changes
+            if hasattr(self, 'destinations_notebook'):
+                self.refresh_destinations_notebook()
+            
+            # Update destination tab entries if they exist
+            if default_dest in self.destination_widgets:
+                widgets = self.destination_widgets[default_dest]
+                if 'datasheet_entry' in widgets and global_settings.get('path'):
+                    widgets['datasheet_entry'].delete(0, tk.END)
+                    widgets['datasheet_entry'].insert(0, global_settings['path'])
+                if 'datasheet_coord_entry' in widgets and global_settings.get('datasheet_coord'):
+                    widgets['datasheet_coord_entry'].delete(0, tk.END)
+                    widgets['datasheet_coord_entry'].insert(0, global_settings['datasheet_coord'])
+                if 'ds_str_entry' in widgets and global_settings.get('ds_str'):
+                    widgets['ds_str_entry'].delete(0, tk.END)
+                    widgets['ds_str_entry'].insert(0, global_settings['ds_str'])
+                if 'rows_per_sheet_entry' in widgets and global_settings.get('rows_per_sheet'):
+                    widgets['rows_per_sheet_entry'].delete(0, tk.END)
+                    widgets['rows_per_sheet_entry'].insert(0, str(global_settings['rows_per_sheet']))
+                if 'sig_figs_entry' in widgets and global_settings.get('sig_figs'):
+                    widgets['sig_figs_entry'].delete(0, tk.END)
+                    widgets['sig_figs_entry'].insert(0, str(global_settings['sig_figs']))
+                if 'rounding_tolerance_entry' in widgets and global_settings.get('rounding_tolerance'):
+                    widgets['rounding_tolerance_entry'].delete(0, tk.END)
+                    widgets['rounding_tolerance_entry'].insert(0, str(global_settings['rounding_tolerance']))
+            
+            # Show success message
+            success_text = "Migration completed successfully!\n\nMigrated items:\n" + "\n".join(f"  • {item}" for item in migrated_items)
+            success_text += "\n\nYour data is now in the new multi-destination format."
+            success_text += "\nYou can now create additional destinations and configure coordinate mappings for each."
+            messagebox.showinfo("Migration Complete", success_text)
+            
+        except Exception as e:
+            error_msg = f"Error during migration: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Migration Error", error_msg)
 
     def save_settings(self, use_pickle=True):
         """Save current settings to the current file or prompt if none exists"""
@@ -3542,6 +4349,53 @@ class DatasheetGeneratorApp:
                         'tags_per_sheet': 1,
                         'selected_sheets': []
                     })
+                }
+            
+            # Save destinations configuration - iterate through all tabs to ensure we capture all destinations
+            settings_data['destinations'] = {}
+            
+            # First, collect all destinations from tabs in the notebook
+            destinations_from_tabs = set()
+            if hasattr(self, 'destinations_notebook'):
+                for i in range(self.destinations_notebook.index("end")):
+                    tab_text = self.destinations_notebook.tab(i, "text")
+                    destinations_from_tabs.add(tab_text)
+            
+            # Combine destinations from tabs and dictionary to ensure we get all
+            all_destinations = destinations_from_tabs.union(set(self.destinations.keys()))
+            
+            for destination in all_destinations:
+                # Get config from dictionary if it exists, otherwise create default
+                config = self.destinations.get(destination, {
+                    'path': '',
+                    'datasheet_coord': '',
+                    'ds_str': '',
+                    'rows_per_sheet': 1,
+                    'sig_figs': 4,
+                    'rounding_tolerance': 1e-2
+                })
+                
+                # Get current values from UI entries for this destination
+                try:
+                    dest_path, dest_coord, dest_prefix, dest_rows, dest_sig_figs, dest_tolerance = self.get_destination_ui_values(destination)
+                    # Update config with current UI values
+                    config['path'] = dest_path
+                    config['datasheet_coord'] = dest_coord
+                    config['ds_str'] = dest_prefix
+                    config['rows_per_sheet'] = dest_rows
+                    config['sig_figs'] = dest_sig_figs
+                    config['rounding_tolerance'] = dest_tolerance
+                except Exception as e:
+                    print(f"Warning: Could not get UI values for destination {destination}: {e}")
+                    # Use stored config values as fallback
+                
+                settings_data['destinations'][destination] = {
+                    'path': config.get('path', ''),
+                    'datasheet_coord': config.get('datasheet_coord', ''),
+                    'ds_str': config.get('ds_str', ''),
+                    'rows_per_sheet': config.get('rows_per_sheet', 1),
+                    'sig_figs': config.get('sig_figs', 4),
+                    'rounding_tolerance': config.get('rounding_tolerance', 1e-2)
                 }
             
             # Write to file
@@ -3628,6 +4482,53 @@ class DatasheetGeneratorApp:
                     })
                 }
             
+            # Save destinations configuration - iterate through all tabs to ensure we capture all destinations
+            settings_data['destinations'] = {}
+            
+            # First, collect all destinations from tabs in the notebook
+            destinations_from_tabs = set()
+            if hasattr(self, 'destinations_notebook'):
+                for i in range(self.destinations_notebook.index("end")):
+                    tab_text = self.destinations_notebook.tab(i, "text")
+                    destinations_from_tabs.add(tab_text)
+            
+            # Combine destinations from tabs and dictionary to ensure we get all
+            all_destinations = destinations_from_tabs.union(set(self.destinations.keys()))
+            
+            for destination in all_destinations:
+                # Get config from dictionary if it exists, otherwise create default
+                config = self.destinations.get(destination, {
+                    'path': '',
+                    'datasheet_coord': '',
+                    'ds_str': '',
+                    'rows_per_sheet': 1,
+                    'sig_figs': 4,
+                    'rounding_tolerance': 1e-2
+                })
+                
+                # Get current values from UI entries for this destination
+                try:
+                    dest_path, dest_coord, dest_prefix, dest_rows, dest_sig_figs, dest_tolerance = self.get_destination_ui_values(destination)
+                    # Update config with current UI values
+                    config['path'] = dest_path
+                    config['datasheet_coord'] = dest_coord
+                    config['ds_str'] = dest_prefix
+                    config['rows_per_sheet'] = dest_rows
+                    config['sig_figs'] = dest_sig_figs
+                    config['rounding_tolerance'] = dest_tolerance
+                except Exception as e:
+                    print(f"Warning: Could not get UI values for destination {destination}: {e}")
+                    # Use stored config values as fallback
+                
+                settings_data['destinations'][destination] = {
+                    'path': config.get('path', ''),
+                    'datasheet_coord': config.get('datasheet_coord', ''),
+                    'ds_str': config.get('ds_str', ''),
+                    'rows_per_sheet': config.get('rows_per_sheet', 1),
+                    'sig_figs': config.get('sig_figs', 4),
+                    'rounding_tolerance': config.get('rounding_tolerance', 1e-2)
+                }
+            
             # Write to file
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(settings_data, f, indent=2, ensure_ascii=False)
@@ -3710,13 +4611,38 @@ class DatasheetGeneratorApp:
                             # Update the existing data source configuration
                             for key, value in config.items():
                                 self.data_sources[data_source][key] = value
-                        
+                
+                # Load destinations configuration
+                if 'destinations' in settings_data:
+                    for destination, config in settings_data['destinations'].items():
+                        # Create the destination if it doesn't exist
+                        if destination not in self.destinations:
+                            self.add_destination(destination, config)
+                        else:
+                            # Update the existing destination configuration
+                            for key, value in config.items():
+                                self.destinations[destination][key] = value
+                else:
+                    # If no destinations in saved file, create a default one for backward compatibility
+                    if not self.destinations:
+                        default_dest = "Default"
+                        self.add_destination(default_dest, {
+                            'path': '', 'datasheet_coord': '', 'ds_str': '',
+                            'rows_per_sheet': 1, 'sig_figs': 4, 'rounding_tolerance': 1e-2
+                        })
+                
+                # Initialize coordinate maps for all data source * destination combinations
+                # This ensures coordinate maps exist even if they weren't in the saved file
+                self.initialize_coordinate_maps_for_all_combinations()
                 
                 # Refresh the UI to reflect loaded settings
                 # Clear the entries list since widgets will be recreated
                 self.entries = []
                 # First refresh the data sources notebook to show any new data sources
                 self.refresh_data_sources_notebook()
+                # Refresh destinations notebook to show any new destinations
+                if hasattr(self, 'destinations_notebook'):
+                    self.refresh_destinations_notebook()
                 # Then refresh data source frames in case new data sources were loaded
                 self.refresh_data_source_frames()
                 # Finally refresh all tab content to show the loaded data
@@ -3736,6 +4662,31 @@ class DatasheetGeneratorApp:
                         top_tag = config.get('top_tag', '')
                         partial_match = config.get('partial_match', False)
                         self.set_data_source_ui_values(data_source, source_sheet_name, top_tag, partial_match)
+                
+                # Set destination specific UI entries after UI is refreshed
+                if 'destinations' in settings_data:
+                    for destination, config in settings_data['destinations'].items():
+                        # Update destination UI entries if they exist
+                        if destination in self.destination_widgets:
+                            widgets = self.destination_widgets[destination]
+                            if 'datasheet_entry' in widgets:
+                                widgets['datasheet_entry'].delete(0, tk.END)
+                                widgets['datasheet_entry'].insert(0, config.get('path', ''))
+                            if 'datasheet_coord_entry' in widgets:
+                                widgets['datasheet_coord_entry'].delete(0, tk.END)
+                                widgets['datasheet_coord_entry'].insert(0, config.get('datasheet_coord', ''))
+                            if 'ds_str_entry' in widgets:
+                                widgets['ds_str_entry'].delete(0, tk.END)
+                                widgets['ds_str_entry'].insert(0, config.get('ds_str', ''))
+                            if 'rows_per_sheet_entry' in widgets:
+                                widgets['rows_per_sheet_entry'].delete(0, tk.END)
+                                widgets['rows_per_sheet_entry'].insert(0, str(config.get('rows_per_sheet', 1)))
+                            if 'sig_figs_entry' in widgets:
+                                widgets['sig_figs_entry'].delete(0, tk.END)
+                                widgets['sig_figs_entry'].insert(0, str(config.get('sig_figs', 4)))
+                            if 'rounding_tolerance_entry' in widgets:
+                                widgets['rounding_tolerance_entry'].delete(0, tk.END)
+                                widgets['rounding_tolerance_entry'].insert(0, str(config.get('rounding_tolerance', 1e-2)))
                 
                 # Update the current settings file and window title
                 self.current_settings_file = last_file
@@ -4033,7 +4984,7 @@ class DatasheetGeneratorApp:
         view_window.transient(self.root)
         # Removed grab_set() to allow opening multiple viewers and interacting with search results
         
-        dialog_width = 800  # Set a reasonable default width
+        dialog_width = 900  # Set a reasonable default width
         dialog_height = 600  # Set a reasonable default height
         view_window.geometry(f"{dialog_width}x{dialog_height}")
         
@@ -4082,7 +5033,7 @@ class DatasheetGeneratorApp:
             else:
                 scrolled_text.insert(tk.END, f"No {name} data available.")
             
-            scrolled_text.configure(state='disabled')
+            # Keep it editable - removed state='disabled'
             
             # Reapply search highlighting if function is available
             if reapply_search[0] is not None:
@@ -4221,6 +5172,29 @@ class DatasheetGeneratorApp:
                 tk.messagebox.showerror("Error", 
                                       f"An error occurred while pasting from clipboard:\n{str(e)}")
 
+        def copy_to_clipboard():
+            """Copy current data as JSON to clipboard"""
+            try:
+                current_data = self.data_sources[data_source]['data']
+                if not current_data:
+                    tk.messagebox.showwarning("No Data", f"No {name} data available to copy.")
+                    return
+                
+                # Convert data to JSON string with indentation for readability
+                json_string = json.dumps(current_data, indent=2, ensure_ascii=False)
+                
+                # Copy to clipboard
+                self.root.clipboard_clear()
+                self.root.clipboard_append(json_string)
+                
+                # Show success message
+                tk.messagebox.showinfo("Copy Complete", 
+                                     f"Successfully copied {len(current_data)} entries to clipboard as JSON.")
+                
+            except Exception as e:
+                tk.messagebox.showerror("Copy Error", 
+                                      f"An error occurred while copying to clipboard:\n{str(e)}")
+
         def sort_data():
             """Sort the dictionary data by keys or values"""
             current_data = self.data_sources[data_source]['data']
@@ -4236,7 +5210,7 @@ class DatasheetGeneratorApp:
             center_window_over_parent(sort_dialog)
             # Center the dialog
             dialog_width = 400
-            dialog_height = 250
+            dialog_height = 300
             sort_dialog.geometry(f"{dialog_width}x{dialog_height}")
             
             # Sort by option
@@ -4370,7 +5344,7 @@ class DatasheetGeneratorApp:
             center_window_over_parent(layered_sort_dialog)
             
             dialog_width = 600
-            dialog_height = 600
+            dialog_height = 650
             layered_sort_dialog.geometry(f"{dialog_width}x{dialog_height}")
             
             # Main frame
@@ -4434,7 +5408,7 @@ class DatasheetGeneratorApp:
                 layer_dialog.title("Add Sort Layer")
                 layer_dialog.transient(layered_sort_dialog)
                 layer_dialog.grab_set()
-                layer_dialog.geometry("400x300")
+                layer_dialog.geometry("400x400")
                 center_window_over_parent(layer_dialog)
                 
                 # Sort type selection
@@ -4477,6 +5451,44 @@ class DatasheetGeneratorApp:
                 tk.Label(custom_field_frame, text="Field for Custom:").pack(side=tk.LEFT)
                 custom_field_entry = tk.Entry(custom_field_frame, width=20)
                 custom_field_entry.pack(side=tk.LEFT, padx=5)
+                
+                # Function to update entry states based on radio button selections
+                def update_entry_states(*args):
+                    sort_type = sort_type_var.get()
+                    custom_sort_by = custom_sort_by_var.get()
+                    
+                    # Enable/disable field entry based on sort type
+                    if sort_type == "field":
+                        field_entry.config(state=tk.NORMAL)
+                    else:
+                        field_entry.config(state=tk.DISABLED)
+                    
+                    # Enable/disable custom pattern entry and options based on sort type
+                    if sort_type == "custom":
+                        pattern_entry.config(state=tk.NORMAL)
+                        # Enable custom sort by radio buttons
+                        for widget in custom_options_frame.winfo_children():
+                            if isinstance(widget, tk.Radiobutton):
+                                widget.config(state=tk.NORMAL)
+                        # Enable/disable custom field entry based on custom_sort_by
+                        if custom_sort_by == "field":
+                            custom_field_entry.config(state=tk.NORMAL)
+                        else:
+                            custom_field_entry.config(state=tk.DISABLED)
+                    else:
+                        pattern_entry.config(state=tk.DISABLED)
+                        # Disable custom sort by radio buttons
+                        for widget in custom_options_frame.winfo_children():
+                            if isinstance(widget, tk.Radiobutton):
+                                widget.config(state=tk.DISABLED)
+                        custom_field_entry.config(state=tk.DISABLED)
+                
+                # Trace changes to radio button variables
+                sort_type_var.trace('w', update_entry_states)
+                custom_sort_by_var.trace('w', update_entry_states)
+                
+                # Initialize entry states
+                update_entry_states()
                 
                 # Helper text for custom patterns
                 tk.Label(type_frame, text="Examples: '\\d+' (numbers), '\\d{4}' (4-digit numbers), '[A-Z]+' (letters)", 
@@ -4800,6 +5812,10 @@ class DatasheetGeneratorApp:
         paste_button = tk.Button(button_frame, text="Paste from Clipboard", command=paste_from_clipboard)
         paste_button.pack(side=tk.LEFT, padx=5)
         
+        # Add Copy to Clipboard button
+        copy_button = tk.Button(button_frame, text="Copy JSON to Clipboard", command=copy_to_clipboard)
+        copy_button.pack(side=tk.LEFT, padx=5)
+        
         # Add Modify Keys button
         modify_keys_button = tk.Button(button_frame, text="Modify Keys", command=lambda: self.update_data_source_keys(data_source, parent=view_window, refresh_callback=refresh_display))
         modify_keys_button.pack(side=tk.LEFT, padx=5)
@@ -4831,7 +5847,117 @@ class DatasheetGeneratorApp:
         else:
             scrolled_text.insert(tk.END, f"No {name} data available.")
 
-        scrolled_text.configure(state='disabled')  # Make read-only
+        # Keep it editable - removed state='disabled'
+        
+        def save_edited_changes():
+            """Save edited content from the text widget back to the data source"""
+            try:
+                # Get the content from the text widget
+                content = scrolled_text.get("1.0", tk.END).strip()
+                
+                if not content or content == f"No {name} data available.":
+                    tk.messagebox.showwarning("No Data", "No data to save.")
+                    return
+                
+                # Parse the content back into a dictionary
+                # Format: "key: value\n\n"
+                new_data = {}
+                lines = content.split('\n')
+                current_key = None
+                current_value = []
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        # Empty line means end of current entry
+                        if current_key is not None:
+                            # Join accumulated value parts
+                            value_str = '\n'.join(current_value).strip()
+                            # Try to parse as JSON if it looks like JSON, otherwise keep as string
+                            try:
+                                # Check if it looks like JSON (starts with { or [)
+                                if value_str.startswith('{') or value_str.startswith('['):
+                                    new_data[current_key] = json.loads(value_str)
+                                else:
+                                    new_data[current_key] = value_str
+                            except:
+                                new_data[current_key] = value_str
+                            current_key = None
+                            current_value = []
+                        continue
+                    
+                    # Check if this line contains a colon (key: value format)
+                    if ':' in line and current_key is None:
+                        parts = line.split(':', 1)
+                        if len(parts) == 2:
+                            current_key = parts[0].strip()
+                            value_part = parts[1].strip()
+                            if value_part:
+                                current_value = [value_part]
+                            else:
+                                current_value = []
+                        else:
+                            # No colon found, treat as continuation of previous value
+                            if current_key is not None:
+                                current_value.append(line)
+                            else:
+                                # First line without colon, treat as key with empty value
+                                current_key = line
+                                current_value = []
+                    else:
+                        # Continuation of value
+                        if current_key is not None:
+                            current_value.append(line)
+                        else:
+                            # No key yet, treat as key
+                            current_key = line
+                            current_value = []
+                
+                # Handle last entry if there's no trailing empty line
+                if current_key is not None:
+                    value_str = '\n'.join(current_value).strip()
+                    try:
+                        if value_str.startswith('{') or value_str.startswith('['):
+                            new_data[current_key] = json.loads(value_str)
+                        else:
+                            new_data[current_key] = value_str
+                    except:
+                        new_data[current_key] = value_str
+                
+                if not new_data:
+                    tk.messagebox.showwarning("No Data", "Could not parse any data from the edited content.")
+                    return
+                
+                # Confirm save
+                result = tk.messagebox.askyesno("Confirm Save", 
+                                              f"This will overwrite the current {name} data with the edited content.\n\n"
+                                              f"Found {len(new_data)} entries in edited content.\n\n"
+                                              "Do you want to continue?")
+                
+                if result:
+                    # Update the data
+                    self.data_sources[data_source]['data'] = new_data
+                    
+                    # Update coordinates combo box with new data
+                    self.update_coordinates_combo_box(data_source)
+                    
+                    # Update tab text to show checkmark
+                    self.add_checkmark_to_tab(data_source)
+                    
+                    # Show success message
+                    tk.messagebox.showinfo("Save Complete", 
+                                         f"Successfully saved {len(new_data)} entries from edited content.")
+                    
+                    # Refresh the display to show the saved data
+                    refresh_display()
+                    
+            except Exception as e:
+                tk.messagebox.showerror("Save Error", 
+                                      f"An error occurred while saving edited content:\n{str(e)}")
+
+        # Add Save Changes button to button frame
+        save_changes_button = tk.Button(button_frame, text="Save Changes", command=save_edited_changes)
+        save_changes_button.pack(side=tk.LEFT, padx=5)
         
         # Configure tags for search highlighting
         scrolled_text.tag_configure("highlight", background="yellow", foreground="black")
@@ -5000,20 +6126,93 @@ class DatasheetGeneratorApp:
 
     def save_and_close_workbook(self):
         """Save and close the current workbook"""
+        if self.excel_mgr.wb:
+            self.excel_mgr.save_workbook()
         self.excel_mgr.close_workbook()
 
     def release_excel_connection(self):
-        """Release the xlwings connection to Excel, allowing user to save independently"""
+        """Release the xlwings connection to the current destination's workbook, allowing user to save independently"""
         try:
-            if self.excel_mgr.wb or self.excel_mgr.app:
-                # Release the connection but keep Excel open
-                self.excel_mgr.release_connection()
-                tk.messagebox.showinfo("Excel Released", 
-                                     "xlwings connection has been released. The workbook remains open in Excel and you can now save it independently.")
+            current_destination = self.get_current_destination()
+            if current_destination:
+                dest_path, _, _, _, _, _ = self.get_destination_ui_values(current_destination)
+                if dest_path and self.excel_mgr.wb:
+                    # Check if the current workbook matches this destination
+                    try:
+                        current_wb_path = os.path.normpath(os.path.abspath(self.excel_mgr.wb.fullname)).lower()
+                        dest_path_normalized = os.path.normpath(os.path.abspath(dest_path)).lower()
+                        if current_wb_path == dest_path_normalized:
+                            # Release the connection but keep Excel open
+                            self.excel_mgr.release_connection()
+                            # Remove from cache so it won't be switched back to
+                            if self.excel_mgr.original_path:
+                                normalized_path = self.excel_mgr._normalize_path(self.excel_mgr.original_path)
+                                if normalized_path in self.excel_mgr.open_workbooks:
+                                    del self.excel_mgr.open_workbooks[normalized_path]
+                            tk.messagebox.showinfo("Excel Released", 
+                                                 f"xlwings connection to '{current_destination}' workbook has been released. The workbook remains open in Excel and you can now save it independently.")
+                        else:
+                            tk.messagebox.showinfo("Info", 
+                                                 f"Current workbook does not match destination '{current_destination}'. No connection to release.")
+                    except Exception as e:
+                        print(f"Error checking workbook path: {e}")
+                        # Try to release anyway
+                        if self.excel_mgr.wb or self.excel_mgr.app:
+                            self.excel_mgr.release_connection()
+                            tk.messagebox.showinfo("Excel Released", 
+                                                 "xlwings connection has been released. The workbook remains open in Excel.")
+                else:
+                    tk.messagebox.showinfo("Info", 
+                                         f"No workbook is currently open for destination '{current_destination}'.")
+            else:
+                # No destination selected, try to release current workbook if any
+                if self.excel_mgr.wb or self.excel_mgr.app:
+                    self.excel_mgr.release_connection()
+                    tk.messagebox.showinfo("Excel Released", 
+                                         "xlwings connection has been released. The workbook remains open in Excel and you can now save it independently.")
+                else:
+                    tk.messagebox.showinfo("Info", "No Excel connection to release.")
 
         except Exception as e:
             tk.messagebox.showerror("Error", 
                                   f"Error releasing Excel connection: {str(e)}")
+    
+    def release_all_excel_connections(self):
+        """Release all xlwings connections to all open workbooks, allowing user to save independently"""
+        try:
+            if not self.excel_mgr.open_workbooks:
+                tk.messagebox.showinfo("Info", "No Excel workbooks are currently open.")
+                return
+            
+            released_count = 0
+            for normalized_path, workbook_info in list(self.excel_mgr.open_workbooks.items()):
+                try:
+                    # Set current state to this workbook
+                    self.excel_mgr.wb = workbook_info['wb']
+                    self.excel_mgr.app = workbook_info['app']
+                    self.excel_mgr.is_dirty = workbook_info['is_dirty']
+                    self.excel_mgr.original_path = workbook_info['original_path']
+                    self.excel_mgr.temp_path = workbook_info['temp_path']
+                    # Release connection (this will set wb and app to None)
+                    self.excel_mgr.release_connection()
+                    released_count += 1
+                except Exception as e:
+                    print(f"Error releasing workbook {workbook_info.get('original_path', 'unknown')}: {e}")
+            
+            # Clear the cache and reset current references
+            self.excel_mgr.open_workbooks.clear()
+            self.excel_mgr.wb = None
+            self.excel_mgr.app = None
+            self.excel_mgr.is_dirty = False
+            self.excel_mgr.original_path = None
+            self.excel_mgr.temp_path = None
+            
+            tk.messagebox.showinfo("Excel Released", 
+                                 f"Released xlwings connections to {released_count} workbook(s). The workbooks remain open in Excel and you can now save them independently.")
+
+        except Exception as e:
+            tk.messagebox.showerror("Error", 
+                                  f"Error releasing Excel connections: {str(e)}")
 
     def show_generation_report(self):
         """Show a detailed report of the datasheet generation process"""
@@ -5024,8 +6223,8 @@ class DatasheetGeneratorApp:
             # Get additional information for the report
             # Use the actual source sheet name that was used in the process
             source_sheet = getattr(self, 'last_used_source_sheet', "Unknown")
-            datasheet_prefix = self.ds_str if hasattr(self, 'ds_str') else "Unknown"
-            rows_per_sheet = self.rows_per_sheet if hasattr(self, 'rows_per_sheet') else "Unknown"
+            datasheet_prefix = getattr(self, 'last_used_datasheet_prefix', "Unknown")
+            rows_per_sheet = getattr(self, 'last_used_rows_per_sheet', "Unknown")
             
             # Get statistics from the generation process
             green_highlighted = 0
@@ -5111,11 +6310,11 @@ The datasheets have been generated and are ready for use."""
         # Stop Excel monitoring
         self.stop_excel_monitoring()
         
-        # Release Excel connection before cleanup
+        # Close all open workbooks when closing the app
         try:
-            self.release_excel_connection()
+            self.excel_mgr.cleanup(close_all=True)
         except Exception as e:
-            print(f"Warning: Error releasing Excel connection: {e}")
+            print(f"Warning: Error closing workbooks: {e}")
         
         self.root.destroy()
 
@@ -5142,7 +6341,7 @@ The datasheets have been generated and are ready for use."""
             entry.insert(0, filename)
             self.coordinate_value_path = filename
 
-    def browse_datasheets(self, entry):
+    def browse_datasheets(self, entry, destination=None):
         """Browse for datasheets file"""
         print("DEBUG: Starting browse_datasheets...")
         filename = filedialog.askopenfilename(
@@ -5157,8 +6356,15 @@ The datasheets have been generated and are ready for use."""
                 print("DEBUG: File selected, updating entry...")
                 entry.delete(0, tk.END)
                 entry.insert(0, filename)
-                self.destination_datasheet = filename
-                print(f"DEBUG: Destination Datasheet set to: {self.destination_datasheet}")
+                
+                # If destination is provided, update that destination's path
+                if destination and destination in self.destinations:
+                    self.destinations[destination]['path'] = filename
+                    print(f"DEBUG: Destination '{destination}' path set to: {filename}")
+                else:
+                    # Legacy: update global destination_datasheet
+                    self.destination_datasheet = filename
+                    print(f"DEBUG: Destination Datasheet set to: {self.destination_datasheet}")
                 
                 self._cached_sheet_names = None
                 self._cached_sheet_file = None
@@ -5167,7 +6373,10 @@ The datasheets have been generated and are ready for use."""
             except Exception as e:
                 print(f"DEBUG: Error setting datasheets file: {e}")
                 # Still set the filename even if there's an error
-                self.destination_datasheet = filename
+                if destination and destination in self.destinations:
+                    self.destinations[destination]['path'] = filename
+                else:
+                    self.destination_datasheet = filename
 
     def browse_data_source(self, entry, data_source):
         """Browse for a file for a specific data source"""
@@ -5255,6 +6464,56 @@ The datasheets have been generated and are ready for use."""
             else:
                 print(f"ERROR: No stored reference found for {variable}")
     
+    def get_destination_ui_values(self, destination):
+        """Get current values directly from destination-specific UI entries"""
+        try:
+            if destination not in self.destination_widgets:
+                print(f"No UI widgets found for destination {destination}")
+                # Fall back to stored destination config
+                config = self.destinations.get(destination, {})
+                return (
+                    config.get('path', ''),
+                    config.get('datasheet_coord', ''),
+                    config.get('ds_str', ''),
+                    config.get('rows_per_sheet', 1),
+                    config.get('sig_figs', 4),
+                    config.get('rounding_tolerance', 1e-2)
+                )
+            
+            widgets = self.destination_widgets[destination]
+            
+            # Get values from entry widgets
+            path = widgets.get('datasheet_entry', tk.Entry()).get().strip() if 'datasheet_entry' in widgets else ''
+            datasheet_coord = widgets.get('datasheet_coord_entry', tk.Entry()).get().strip() if 'datasheet_coord_entry' in widgets else ''
+            ds_str = widgets.get('ds_str_entry', tk.Entry()).get().strip() if 'ds_str_entry' in widgets else ''
+            
+            rows_per_sheet_str = widgets.get('rows_per_sheet_entry', tk.Entry()).get().strip() if 'rows_per_sheet_entry' in widgets else '1'
+            rows_per_sheet = int(rows_per_sheet_str) if rows_per_sheet_str.isdigit() else 1
+            
+            sig_figs_str = widgets.get('sig_figs_entry', tk.Entry()).get().strip() if 'sig_figs_entry' in widgets else '4'
+            sig_figs = int(sig_figs_str) if sig_figs_str.isdigit() else 4
+            
+            tolerance_str = widgets.get('rounding_tolerance_entry', tk.Entry()).get().strip() if 'rounding_tolerance_entry' in widgets else '1e-2'
+            try:
+                rounding_tolerance = float(tolerance_str) if tolerance_str.replace('.', '').replace('-', '').replace('e', '').replace('E', '').replace('+', '').isdigit() or 'e' in tolerance_str.lower() else 1e-2
+            except:
+                rounding_tolerance = 1e-2
+            
+            return (path, datasheet_coord, ds_str, rows_per_sheet, sig_figs, rounding_tolerance)
+            
+        except Exception as e:
+            print(f"Error getting destination UI values for {destination}: {e}")
+            # Fall back to stored config
+            config = self.destinations.get(destination, {})
+            return (
+                config.get('path', ''),
+                config.get('datasheet_coord', ''),
+                config.get('ds_str', ''),
+                config.get('rows_per_sheet', 1),
+                config.get('sig_figs', 4),
+                config.get('rounding_tolerance', 1e-2)
+            )
+
     def get_data_source_ui_values(self, data_source):
         """Get current values directly from data_source specific UI entries using stored references"""
         try:
@@ -5368,6 +6627,9 @@ The datasheets have been generated and are ready for use."""
         
         # Update each data source's combobox
         for data_source, ui_entries in self.data_source_ui_entries.items():
+            # Skip data sources that no longer exist (e.g., after new project)
+            if data_source not in self.data_sources:
+                continue
             if 'source_sheet_entry' in ui_entries and ui_entries['source_sheet_entry']:
                 try:
                     source_sheet_entry = ui_entries['source_sheet_entry']
@@ -5376,16 +6638,45 @@ The datasheets have been generated and are ready for use."""
                 except Exception as e:
                     print(f"DEBUG: Error updating combobox for data source '{data_source}': {e}")
 
-    def configure_ds(self):
+    def configure_ds(self, destination=None):
         print("DEBUG: Starting configure_ds...")
         
-        # Get the path from the datasheet entry field
-        current_path = self.datasheet_entry.get()
-        if current_path:
-            self.destination_datasheet = current_path
-            print(f"DEBUG: Using destination datasheet path from entry: {current_path}")
+        # If no destination provided, use current destination
+        if destination is None:
+            destination = self.get_current_destination()
+            print(f"DEBUG: No destination provided, using current destination: {destination}")
         
-        # Initialize Excel with the current workbook
+        # Get the path from the appropriate entry field
+        if destination and destination in self.destination_widgets:
+            # Use destination-specific entry
+            widgets = self.destination_widgets[destination]
+            if 'datasheet_entry' in widgets:
+                current_path = widgets['datasheet_entry'].get()
+                if current_path:
+                    self.destinations[destination]['path'] = current_path
+                    self.destination_datasheet = current_path  # Also set global for compatibility
+                    print(f"DEBUG: Using destination '{destination}' datasheet path from entry: {current_path}")
+                else:
+                    messagebox.showwarning("No Path", f"Please specify a datasheet path for destination '{destination}' before mapping coordinates.")
+                    return
+            else:
+                messagebox.showwarning("No Path", f"Destination '{destination}' does not have a datasheet path configured.")
+                return
+        else:
+            # Use global entry (legacy)
+            if hasattr(self, 'datasheet_entry'):
+                current_path = self.datasheet_entry.get()
+                if current_path:
+                    self.destination_datasheet = current_path
+                    print(f"DEBUG: Using destination datasheet path from entry: {current_path}")
+                else:
+                    messagebox.showwarning("No Path", "Please specify a datasheet path before mapping coordinates.")
+                    return
+            else:
+                messagebox.showwarning("No Path", "No datasheet path configured.")
+                return
+        
+        # Initialize Excel with the current workbook (will switch to it if already open)
         self.init_excel()
         print("DEBUG: init_excel completed, setting cached sheet names...")
         
@@ -5563,7 +6854,7 @@ The datasheets have been generated and are ready for use."""
             # Find the current data source tab and its coordinates tab
             current_tab_id = self.data_sources_notebook.select()
             current_tab_text = self.data_sources_notebook.tab(current_tab_id, "text")
-            current_data_source = current_tab_text.replace(" ✓", "").strip()
+            current_data_source = self.strip_tab_indicators(current_tab_text).strip()
             
             # Find the coordinates tab within the current data source tab
             current_tab = self.data_sources_notebook.nametowidget(current_tab_id)
@@ -6248,9 +7539,15 @@ The datasheets have been generated and are ready for use."""
             print(f"  - Traceback: {traceback.format_exc()}")
             return None, 0.0, None
 
-    def automap_range(self, data_source, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
+    def automap_range(self, data_source, full_selection, combo_box, coord_entry, listbox, min_score=0.3, destination=None):
         """Iterate through a range of cells and perform semantic mapping"""
         try:
+            # Get current destination if not provided
+            if destination is None:
+                destination = self.get_current_destination()
+                if destination is None:
+                    destination = "Default"
+            
             # Parse the range
             clean_selection = full_selection.replace('$', '')
             
@@ -6258,12 +7555,15 @@ The datasheets have been generated and are ready for use."""
             cell_addresses = self.extract_cell_addresses_from_range(clean_selection)
             print('debug: cell_addresses', cell_addresses)
             # Process all cells using the unified processor
-            successful_mappings, mapping_results = self.process_cells_for_automap(data_source, cell_addresses, min_score)
+            successful_mappings, mapping_results = self.process_cells_for_automap(data_source, cell_addresses, min_score, destination)
             
             # Update the listbox to show all new mappings
             listbox_obj = self.data_source_widgets.get(data_source, {}).get('listbox')
             if listbox_obj:
-                self.update_single_listbox(data_source, listbox_obj)
+                self.update_single_listbox(data_source, listbox_obj, destination)
+            
+            # Update tab color since coordinate maps may have changed
+            self.update_tab_color_for_data_source(data_source)
             
             # Show results summary
             summary = f"AutoMap Range Results:\n\n"
@@ -6283,9 +7583,15 @@ The datasheets have been generated and are ready for use."""
         except Exception as e:
             print(f"Error in automap range: {e}")
 
-    def automap_noncontiguous(self, data_source, full_selection, combo_box, coord_entry, listbox, min_score=0.3):
+    def automap_noncontiguous(self, data_source, full_selection, combo_box, coord_entry, listbox, min_score=0.3, destination=None):
         """Process non-contiguous selections (multiple ranges separated by commas)"""
         try:
+            # Get current destination if not provided
+            if destination is None:
+                destination = self.get_current_destination()
+                if destination is None:
+                    destination = "Default"
+            
             # Parse the non-contiguous selection
             clean_selection = full_selection.replace('$', '')
             ranges = clean_selection.split(',')
@@ -6302,10 +7608,10 @@ The datasheets have been generated and are ready for use."""
                 if ':' in range_addr:
                     # This is a range (e.g., A1:B5)
                     cell_addresses = self.extract_cell_addresses_from_range(range_addr)
-                    successful_mappings, mapping_results = self.process_cells_for_automap(data_source, cell_addresses, min_score)
+                    successful_mappings, mapping_results = self.process_cells_for_automap(data_source, cell_addresses, min_score, destination)
                 else:
                     # This is a single cell (e.g., C3)
-                    successful_mappings, mapping_results = self.process_cells_for_automap(data_source, [range_addr], min_score)
+                    successful_mappings, mapping_results = self.process_cells_for_automap(data_source, [range_addr], min_score, destination)
                 
                 total_successful_mappings += successful_mappings
                 all_mapping_results.extend(mapping_results)
@@ -6314,7 +7620,10 @@ The datasheets have been generated and are ready for use."""
             # Update the listbox to show all new mappings
             listbox_obj = self.data_source_widgets.get(data_source, {}).get('listbox')
             if listbox_obj:
-                self.update_single_listbox(data_source, listbox_obj)
+                self.update_single_listbox(data_source, listbox_obj, destination)
+            
+            # Update tab color since coordinate maps may have changed
+            self.update_tab_color_for_data_source(data_source)
             
             # Show results summary
             summary = f"AutoMap Non-Contiguous Results:\n\n"
@@ -6337,10 +7646,19 @@ The datasheets have been generated and are ready for use."""
 
 
 
-    def update_single_listbox(self, data_source, listbox):
+    def update_single_listbox(self, data_source, listbox, destination=None):
         """Update a single listbox for a specific data source"""
+        # Get current destination if not provided
+        if destination is None:
+            destination = self.get_current_destination()
+            if destination is None:
+                destination = "Default"
+        
         listbox.delete(0, tk.END)
-        coordinate_values = self.data_sources[data_source]['coordinate_values']
+        # Access coordinate_values per destination
+        if destination not in self.data_sources[data_source]['coordinate_values']:
+            self.data_sources[data_source]['coordinate_values'][destination] = {}
+        coordinate_values = self.data_sources[data_source]['coordinate_values'][destination]
         for key, value in coordinate_values.items():
             coord_display = f"{key}: {value}"
             if key in self.data_sources[data_source]['coordinate_conversions']:
@@ -6351,13 +7669,20 @@ The datasheets have been generated and are ready for use."""
                 coord_display += f" [Combines: {', '.join(combo.get('combines', []))} ({combo.get('operation', 'add')})]"
             listbox.insert(tk.END, coord_display)
 
-    def process_cells_for_automap(self, data_source, cell_addresses, min_score=0.3):
+    def process_cells_for_automap(self, data_source, cell_addresses, min_score=0.3, destination=None):
         """Unified function to process any collection of cells for automapping"""
+        # Get current destination if not provided
+        if destination is None:
+            destination = self.get_current_destination()
+            if destination is None:
+                destination = "Default"
+        
         print(f"\n=== PROCESS_CELLS_FOR_AUTOMAP DEBUG ===")
         print(f"Input parameters:")
         print(f"  - data_source: {data_source}")
         print(f"  - cell_addresses: {cell_addresses}")
         print(f"  - min_score: {min_score}")
+        print(f"  - destination: {destination}")
         print(f"  - Total cells to process: {len(cell_addresses)}")
         
         try:
@@ -6444,11 +7769,13 @@ The datasheets have been generated and are ready for use."""
                 # Record the result
                 if best_match:
                     print(f"  - SUCCESS: Adding mapping for {target_cell}")
-                    # Add the mapping
-                    coordinate_values = self.data_sources[data_source]['coordinate_values']
-                    print(f"  - Current coordinate values count: {len(coordinate_values)}")
+                    # Add the mapping - use per-destination structure
+                    if destination not in self.data_sources[data_source]['coordinate_values']:
+                        self.data_sources[data_source]['coordinate_values'][destination] = {}
+                    coordinate_values = self.data_sources[data_source]['coordinate_values'][destination]
+                    print(f"  - Current coordinate values count for '{destination}': {len(coordinate_values)}")
                     coordinate_values[target_cell] = best_match
-                    self.data_sources[data_source]['coordinate_values'] = coordinate_values
+                    self.data_sources[data_source]['coordinate_values'][destination] = coordinate_values
                     successful_mappings += 1
                     header_display = f"'{header}'" if header else "None"
                     mapping_results.append(f"✓ {target_cell} → {best_match} (score: {score:.3f}, header: {header_display})")

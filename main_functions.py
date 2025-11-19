@@ -617,8 +617,14 @@ def update_cell_xlwings(sheet, cell_address, value, cell_update_option=None):
         print(f'Error updating cell {cell_address}: {e}')
         return False
 
-def apply_green_highlighting(sheet, cell_address):
-    """Apply green background highlighting to a cell"""
+def apply_green_highlighting(sheet, cell_address, append_suffix=False):
+    """Apply green background highlighting to a cell
+    
+    Args:
+        sheet: The worksheet to update
+        cell_address: The cell address to highlight
+        append_suffix: If True, append " (instrument(s) deleted)" to the cell value
+    """
     try:
         # Get the cell
         cell = sheet.range(cell_address)
@@ -629,6 +635,17 @@ def apply_green_highlighting(sheet, cell_address):
             merged_range_address = cell.api.MergeArea.Address
             # Use the top-left cell of the merged range
             cell = sheet.range(merged_range_address.split(':')[0])
+        
+        # Append suffix to cell value if requested
+        if append_suffix:
+            current_value = cell.value if cell.value is not None else ""
+            current_value_str = str(current_value).strip()
+            suffix = " (instrument(s) deleted)"
+            
+            # Only append if suffix is not already present
+            if not current_value_str.endswith(suffix):
+                new_value = current_value_str + suffix
+                cell.value = new_value
         
         # Apply green background color
         cell.color = (0, 255, 0)  # Green (RGB)
@@ -654,6 +671,25 @@ def apply_yellow_highlighting(sheet, cell_address):
         
     except Exception as e:
         print(f"Error applying yellow highlighting to {cell_address}: {e}")
+
+def clear_cell_highlighting(sheet, cell_address):
+    """Clear background highlighting from a cell (set to automatic/no fill)"""
+    try:
+        # Get the cell
+        cell = sheet.range(cell_address)
+        
+        # Check if cell is part of a merged range
+        if cell.api.MergeCells:
+            # Get the merged range address
+            merged_range_address = cell.api.MergeArea.Address
+            # Use the top-left cell of the merged range
+            cell = sheet.range(merged_range_address.split(':')[0])
+        
+        # Clear background color by setting to None (automatic/no fill)
+        cell.color = None
+        
+    except Exception as e:
+        print(f"Error clearing highlighting from {cell_address}: {e}")
 
 
 def create_or_get_sheet(datasheet, sheet_name, source_sheet=None, make_visible=True):
@@ -754,7 +790,8 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                    rows_per_sheet=1, custom_sort=None, key_coordinate='I12',
                    sig_figs=4, tolerance=1e-2, halt_callback=None, cell_update_option=None, 
                    partial_match=False, disable_green_highlight=False,
-                   fill_mode='always_new', update_matched=True):
+                   fill_mode='always_new', update_matched=True, append_suffix_to_green=False,
+                   clear_highlighting_on_match=False):
     """
     Manages Excel sheets by adding or updating data based on tags, with multiple fill strategies.
     
@@ -765,6 +802,8 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
             - 'always_new': Always create new sheets for new tags.
             - 'ignore': Do not add any new tags, only update existing ones.
         update_matched (bool): If True, updates data for tags that are already present.
+        append_suffix_to_green (bool): If True, appends " (instrument(s) deleted)" to cell values when highlighting them green.
+        clear_highlighting_on_match (bool): If True, clears background highlighting from matched tag cells (sets to automatic/no fill).
         (Other args are the same as before)
     """
     # Initialize statistics counters
@@ -835,6 +874,10 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                 for instance in tag_instances:
                     target_sheet = datasheet.sheets[instance['sheet']]
                     row_offset = int(instance['coord'][1:]) - int(key_coordinate[1:])
+                    
+                    # Clear highlighting from matched tag cell if option is enabled
+                    if clear_highlighting_on_match:
+                        clear_cell_highlighting(target_sheet, instance['coord'])
                     
                     for cell, value in tag_cell_values[tag].items():
                         target_cell = increment_cell_reference(cell, row_offset)
@@ -927,8 +970,9 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
                     target_sheet = create_or_get_sheet(datasheet, sheet_name, source_sheet)
                     added_sheets.add(sheet_name)
                     
-                    # Update datasheet number coordinate
-                    update_cell_xlwings(target_sheet, datasheet_coord, sheet_name, cell_update_option)
+                    # Update datasheet number coordinate (only if datasheet_coord is provided)
+                    if datasheet_coord and datasheet_coord.strip():
+                        update_cell_xlwings(target_sheet, datasheet_coord, sheet_name, cell_update_option)
 
                 row_in_sheet = slot_in_new_sheets % rows_per_sheet
                 tag_coord = increment_cell_reference(key_coordinate, row_in_sheet)
@@ -959,7 +1003,7 @@ def add_update_datasheets(datasheet, source_sheet_name, tag_cell_values, datashe
             print(f"Highlighting {len(unmatched_instances)} unmatched tag(s) in green.")
             for instance in unmatched_instances:
                 target_sheet = datasheet.sheets[instance['sheet']]
-                apply_green_highlighting(target_sheet, instance['coord'])
+                apply_green_highlighting(target_sheet, instance['coord'], append_suffix=append_suffix_to_green)
                 stats['green_highlighted_cells'] += 1
     
     return list(added_sheets), stats

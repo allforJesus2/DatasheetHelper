@@ -40,11 +40,14 @@ class CoordsToFieldsGenerator:
         self.coord_entry.bind('<Return>', self.add_implicit)
         self.coord_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        add_button = tk.Button(frame1, text="Add", command=self.add_implicit)
+        add_button = tk.Button(frame1, text="Auto Add", command=self.add_implicit)
         add_button.pack(side=tk.LEFT)
 
         explicit_add_button = tk.Button(frame1, text="Add Explicit", command=self.add_explicit)
         explicit_add_button.pack(side=tk.LEFT)
+
+        manual_add_button = tk.Button(frame1, text="Manual Add", command=self.add_manual)
+        manual_add_button.pack(side=tk.LEFT)
 
         remove_button = tk.Button(frame1, text="Remove Entry", command=self.remove_entry)
         remove_button.pack(side=tk.LEFT)
@@ -68,17 +71,10 @@ class CoordsToFieldsGenerator:
         manual_levels_frame = tk.Frame(self.coords_window)
         manual_levels_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        self.manual_levels_var = tk.IntVar(value=0)  # Default unchecked
-        manual_levels_checkbox = tk.Checkbutton(
-            manual_levels_frame,
-            text="Manual header levels (extracts both left & top for all selections):",
-            variable=self.manual_levels_var,
-            command=self.toggle_manual_levels
-        )
-        manual_levels_checkbox.pack(side=tk.LEFT)
+        self.manual_levels_var = tk.IntVar(value=0)  # Default unchecked (for auto mode)
         
         # Left header levels entry
-        tk.Label(manual_levels_frame, text="Left levels:").pack(side=tk.LEFT, padx=(10, 2))
+        tk.Label(manual_levels_frame, text="Left levels:").pack(side=tk.LEFT, padx=(0, 2))
         self.left_levels_entry = tk.Entry(manual_levels_frame, width=5)
         self.left_levels_entry.insert(0, "1")
         self.left_levels_entry.pack(side=tk.LEFT, padx=(0, 10))
@@ -86,7 +82,7 @@ class CoordsToFieldsGenerator:
         # Top header levels entry
         tk.Label(manual_levels_frame, text="Top levels:").pack(side=tk.LEFT, padx=(0, 2))
         self.top_levels_entry = tk.Entry(manual_levels_frame, width=5)
-        self.top_levels_entry.insert(0, "1")
+        self.top_levels_entry.insert(0, "0")
         self.top_levels_entry.pack(side=tk.LEFT)
         
         # Hint label
@@ -102,10 +98,6 @@ class CoordsToFieldsGenerator:
         
         # Hint label for custom prefix
         tk.Label(prefix_frame, text="(Optional prefix for captured field names)", font=("", 8), fg="gray").pack(side=tk.LEFT)
-        
-        # Initially disable the entry fields
-        self.left_levels_entry.config(state='disabled')
-        self.top_levels_entry.config(state='disabled')
 
         frame2 = tk.Frame(self.coords_window)
         frame2.pack(fill=tk.BOTH, expand=True)
@@ -127,14 +119,16 @@ class CoordsToFieldsGenerator:
         
         self.coords_window.after(200, self.update_entry)
 
-    def toggle_manual_levels(self):
-        """Enable/disable manual level entry fields based on checkbox state"""
-        if self.manual_levels_var.get() == 1:
-            self.left_levels_entry.config(state='normal')
-            self.top_levels_entry.config(state='normal')
-        else:
-            self.left_levels_entry.config(state='disabled')
-            self.top_levels_entry.config(state='disabled')
+    def add_manual(self):
+        """Add coordinates using manual mode (extracts both left & top headers)"""
+        # Temporarily enable manual mode
+        self.manual_levels_var.set(1)
+        try:
+            # Call the same logic as add_implicit but with manual mode enabled
+            self.add_implicit()
+        finally:
+            # Reset to auto mode after operation
+            self.manual_levels_var.set(0)
     
     def _build_region_cache(self, start_col, end_col, start_row, end_row):
         """Build internal representation of data region including surrounding header areas

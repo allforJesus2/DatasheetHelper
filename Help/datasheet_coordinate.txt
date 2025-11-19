@@ -3,8 +3,7 @@ Datasheet Coordinate
 
 Specifies the cell coordinate where the datasheet NUMBER or NAME will be written on newly created sheets.
 
-⚠️ REQUIRED ONLY WHEN CREATING NEW SHEETS (Source Sheet Name is provided)
-✓ OPTIONAL when only updating existing sheets (Source Sheet Name is blank)
+✓ OPTIONAL - Can be left blank if you don't want to write the sheet name/number to a specific cell
 
 Usage:
 - Enter an Excel cell reference (e.g., "C8", "A1", "B2")
@@ -22,7 +21,8 @@ Examples:
 - "B2" - Slightly offset if cell A1 contains a logo or title
 
 When New Sheets Are Created:
-- If creating "DS-001", "DS-002", etc., each number is written at this coordinate
+- If datasheet coordinate is provided, the sheet name/number will be written at this coordinate
+- If datasheet coordinate is blank, the sheet will be created but no coordinate cell will be updated
 - If rows_per_sheet = 1, the tag name itself may be used as the sheet name
 - If rows_per_sheet > 1, sequential datasheet numbers are used
 
