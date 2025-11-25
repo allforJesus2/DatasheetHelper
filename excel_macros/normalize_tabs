@@ -1,0 +1,24 @@
+Sub NormalizeTabs()
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    
+    Set wb = ThisWorkbook
+    
+    ' Loop through all worksheets
+    For Each ws In wb.Worksheets
+        ' Activate the worksheet
+        ws.Activate
+        
+        ' Set zoom to 100%
+        ws.Activate
+        ActiveWindow.Zoom = 100
+        
+        ' Scroll to top-left (cell A1)
+        ws.Range("A1").Select
+        Application.ActiveWindow.ScrollRow = 1
+        Application.ActiveWindow.ScrollColumn = 1
+    Next ws
+    
+    MsgBox "All tabs normalized to 100% zoom and top-left view!", vbInformation
+End Sub
+
