@@ -276,6 +276,7 @@ class DatasheetGeneratorApp:
         self.current_excel_selection = None
         self.coordinate_update_callbacks = []  # List of callback functions for each tab
         self.excel_monitoring_active = False
+        self.monitor_excel_selection_id = None  # Store after() callback ID to cancel it
         
         # Initialize datasheets attribute
         self.destination_datasheet = None
@@ -482,6 +483,13 @@ class DatasheetGeneratorApp:
     def stop_excel_monitoring(self):
         """Stop the centralized Excel selection monitoring"""
         self.excel_monitoring_active = False
+        # Cancel any pending callback to prevent it from executing
+        if self.monitor_excel_selection_id and self.root:
+            try:
+                self.root.after_cancel(self.monitor_excel_selection_id)
+                self.monitor_excel_selection_id = None
+            except Exception as e:
+                print(f"Error canceling Excel monitoring callback: {e}")
     
     def register_coordinate_callback(self, callback_func):
         """Register a callback function to be called when Excel selection changes"""
@@ -529,7 +537,7 @@ class DatasheetGeneratorApp:
         
         # Schedule next check
         if self.excel_monitoring_active:
-            self.root.after(200, self.monitor_excel_selection)
+            self.monitor_excel_selection_id = self.root.after(200, self.monitor_excel_selection)
     
     # endregion
     
@@ -2294,8 +2302,7 @@ class DatasheetGeneratorApp:
                 # Update tab color since coordinate map changed
                 self.update_tab_color_for_data_source(data_source)
                 
-                # Clear the entry after adding
-                entry.delete(0, tk.END)
+                # Keep the entry text so user can add multiple coordinates easily
 
         def remove_coordinate(data_source, listbox, dest):
             selected_indices = listbox.curselection()
@@ -5195,6 +5202,82 @@ class DatasheetGeneratorApp:
                 tk.messagebox.showerror("Copy Error", 
                                       f"An error occurred while copying to clipboard:\n{str(e)}")
 
+        def copy_as_table():
+            """Copy current data as a table with headers from first entry's keys"""
+            try:
+                current_data = self.data_sources[data_source]['data']
+                if not current_data:
+                    tk.messagebox.showwarning("No Data", f"No {name} data available to copy.")
+                    return
+                
+                # Get the first entry to determine headers
+                first_key = next(iter(current_data))
+                first_value = current_data[first_key]
+                
+                # Check if first value is a dictionary
+                if not isinstance(first_value, dict):
+                    tk.messagebox.showwarning("Invalid Format", 
+                                            "The first entry's value must be a dictionary to create a table.")
+                    return
+                
+                # Get headers from the first entry's keys
+                headers = list(first_value.keys())
+                if not headers:
+                    tk.messagebox.showwarning("No Headers", 
+                                            "The first entry has no keys to use as headers.")
+                    return
+                
+                # Sanitize headers (remove tabs, newlines, carriage returns)
+                sanitized_headers = []
+                for h in headers:
+                    header_str = str(h)
+                    # Replace tabs and newlines to avoid breaking table structure
+                    header_str = header_str.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+                    sanitized_headers.append(header_str)
+                
+                # Build the table
+                table_lines = []
+                
+                # Add header row (tab-separated)
+                table_lines.append('\t'.join(sanitized_headers))
+                
+                # Add data rows
+                for key, value in current_data.items():
+                    if isinstance(value, dict):
+                        # Extract values in the same order as headers
+                        row_values = []
+                        for header in headers:
+                            cell_value = value.get(header, '')
+                            # Convert to string and handle None
+                            if cell_value is None:
+                                cell_value = ''
+                            else:
+                                cell_value = str(cell_value)
+                            # Replace tabs and newlines to avoid breaking table structure
+                            cell_value = cell_value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+                            row_values.append(cell_value)
+                        table_lines.append('\t'.join(row_values))
+                    else:
+                        # If value is not a dict, create a single-column row
+                        cell_value = str(value).replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+                        table_lines.append(cell_value)
+                
+                # Join all lines with newlines
+                table_string = '\n'.join(table_lines)
+                
+                # Copy to clipboard
+                self.root.clipboard_clear()
+                self.root.clipboard_append(table_string)
+                
+                # Show success message
+                tk.messagebox.showinfo("Copy Complete", 
+                                     f"Successfully copied {len(current_data)} rows to clipboard as table.\n"
+                                     f"Headers: {', '.join(headers)}")
+                
+            except Exception as e:
+                tk.messagebox.showerror("Copy Error", 
+                                      f"An error occurred while copying to clipboard:\n{str(e)}")
+
         def sort_data():
             """Sort the dictionary data by keys or values"""
             current_data = self.data_sources[data_source]['data']
@@ -5815,6 +5898,10 @@ class DatasheetGeneratorApp:
         # Add Copy to Clipboard button
         copy_button = tk.Button(button_frame, text="Copy JSON to Clipboard", command=copy_to_clipboard)
         copy_button.pack(side=tk.LEFT, padx=5)
+        
+        # Add Copy as Table button
+        copy_table_button = tk.Button(button_frame, text="Copy as Table", command=copy_as_table)
+        copy_table_button.pack(side=tk.LEFT, padx=5)
         
         # Add Modify Keys button
         modify_keys_button = tk.Button(button_frame, text="Modify Keys", command=lambda: self.update_data_source_keys(data_source, parent=view_window, refresh_callback=refresh_display))

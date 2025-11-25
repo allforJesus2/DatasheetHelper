@@ -5,11 +5,12 @@ import json
 class RosemountConfigurator:
     def __init__(self, root):
         self.root = root
-        self.root.title("Rosemount 1199 Remote Mount Seal Configurator")
+        self.root.title("Rosemount 1199 Seal System Configurator")
         self.root.geometry("900x700")
         
         # Model number components storage
         self.selections = {}
+        self.mount_type = tk.StringVar(value="Remote")  # Track mount type
         
         # Create main container with scrollbar
         main_frame = ttk.Frame(root)
@@ -29,7 +30,7 @@ class RosemountConfigurator:
         canvas.configure(yscrollcommand=scrollbar.set)
         
         # Title
-        title = ttk.Label(scrollable_frame, text="Rosemount 1199 Remote Mount Seal System", 
+        title = ttk.Label(scrollable_frame, text="Rosemount 1199 Seal System Configurator", 
                          font=("Arial", 16, "bold"))
         title.grid(row=0, column=0, columnspan=3, pady=10, sticky="w")
         
@@ -46,17 +47,30 @@ class RosemountConfigurator:
             {"1199": "Seal systems"},
             "Base model number for seal systems")
         
-        # Connection Type
-        row = self.add_dropdown(scrollable_frame, row, "Connection Type", "connection",
-            {
-                "W": "Welded-repairable (High side)",
-                "M": "Welded-repairable (Low side)",
-                "D": "Welded-repairable (Balanced system)",
-                "A": "All welded, capillary (High side)",
-                "B": "All welded, capillary (Two seal system)",
-                "C": "All welded, capillary (Low side)"
-            },
-            "Type of seal system and location on transmitter")
+        # Mount Type Selector
+        mount_label = ttk.Label(scrollable_frame, text="Mount Type:", font=("Arial", 10, "bold"))
+        mount_label.grid(row=row, column=0, sticky="w", pady=5, padx=(0,10))
+        
+        mount_frame = ttk.Frame(scrollable_frame)
+        mount_frame.grid(row=row, column=1, sticky="w", pady=5)
+        
+        remote_radio = ttk.Radiobutton(mount_frame, text="Remote Mount", variable=self.mount_type, 
+                                      value="Remote", command=self.on_mount_type_change)
+        remote_radio.pack(side=tk.LEFT, padx=5)
+        
+        direct_radio = ttk.Radiobutton(mount_frame, text="Direct Mount", variable=self.mount_type,
+                                       value="Direct", command=self.on_mount_type_change)
+        direct_radio.pack(side=tk.LEFT, padx=5)
+        
+        mount_desc = ttk.Label(scrollable_frame, 
+                              text="Select Remote Mount (with capillary) or Direct Mount (no capillary)",
+                              font=("Arial", 8), foreground="gray")
+        mount_desc.grid(row=row+1, column=1, sticky="w", pady=(0,5))
+        row += 2
+        
+        # Connection Type (will be updated based on mount type)
+        self.connection_row = row
+        row = self.add_connection_type_dropdown(scrollable_frame, row)
         
         # Seal Fill Fluid
         row = self.add_dropdown(scrollable_frame, row, "Seal Fill Fluid", "fill_fluid",
@@ -77,48 +91,31 @@ class RosemountConfigurator:
             },
             "Fill fluid type and temperature range")
         
-        # Seal Connection Type/Capillary ID
-        row = self.add_dropdown(scrollable_frame, row, "Capillary Type", "capillary",
-            {
-                "B": "0.03-in. (0.711 mm) ID",
-                "C": "0.04-in. (1.092 mm) ID",
-                "D": "0.075-in. (1.905 mm) ID",
-                "E": "0.03-in. ID, PVC coated with closed end",
-                "F": "0.04-in. ID, PVC coated with closed end",
-                "G": "0.075-in. ID, PVC coated with closed end",
-                "H": "0.03-in. ID, 4-in. support tube",
-                "J": "0.04-in. ID, 4-in. support tube",
-                "K": "0.075-in. ID, 4-in. support tube",
-                "M": "0.03-in. ID, PVC coated, 4-in. support tube",
-                "N": "0.04-in. ID, PVC coated, 4-in. support tube",
-                "P": "0.075-in. ID, PVC coated, 4-in. support tube"
-            },
-            "Capillary internal diameter and coating")
+        # Seal Connection Type (Direct Mount only)
+        self.seal_conn_row = row
+        row = self.add_seal_connection_type_dropdown(scrollable_frame, row)
         
-        # Capillary Length
-        row = self.add_dropdown(scrollable_frame, row, "Capillary Length", "cap_length",
+        # Seal Connection Type/Capillary ID or Direct Mount Connection
+        self.capillary_row = row
+        row = self.add_capillary_or_direct_dropdown(scrollable_frame, row)
+        
+        # Capillary Length (only for Remote Mount)
+        self.cap_length_row = row
+        row = self.add_capillary_length_dropdown(scrollable_frame, row)
+        
+        # Industry Standard
+        row = self.add_dropdown(scrollable_frame, row, "Industry Standard", "standard",
             {
-                "01": "1.0 ft. (0.3 m)",
-                "05": "5.0 ft. (1.5 m)",
-                "10": "10.0 ft. (3.0 m)",
-                "15": "15.0 ft. (4.5 m)",
-                "20": "20.0 ft. (6.1 m)",
-                "25": "25.0 ft. (7.6 m)",
-                "30": "30.0 ft. (9.1 m)",
-                "40": "40.0 ft. (12.2 m)",
-                "50": "50.0 ft. (15.2 m)",
-                "51": "1.6 ft. (0.5 m)",
-                "52": "3.3 ft. (1.0 m)",
-                "53": "4.9 ft. (1.5 m)",
-                "54": "6.6 ft. (2.0 m)",
-                "55": "8.2 ft. (2.5 m)",
-                "56": "9.8 ft. (3.0 m)",
-                "57": "11.5 ft. (3.5 m)",
-                "58": "13.1 ft. (4.0 m)",
-                "59": "16.4 ft. (5.0 m)",
-                "60": "19.7 ft. (6.0 m)"
+                "A": "ASME B16.5 (American)",
+                "D": "EN 1092-1 (European)",
+                "T": "GOST 33259-15 (Russian)",
+                "J": "JIS B2238 (Japanese)",
+                "G": "HG20615 (Chinese-ASME based)",
+                "K": "HG20592 (Chinese-EN based)",
+                "S": "Hygienic (3-A Standard 74-06)",
+                "N": "Non-industry standard"
             },
-            "Length of capillary tubing")
+            "Manufacturing standard to follow")
         
         # Seal Assembly Type
         row = self.add_dropdown(scrollable_frame, row, "Seal Assembly Type", "seal_type",
@@ -136,20 +133,6 @@ class RosemountConfigurator:
                 "WSP": "Saddle Seal"
             },
             "Type of seal assembly")
-        
-        # Industry Standard
-        row = self.add_dropdown(scrollable_frame, row, "Industry Standard", "standard",
-            {
-                "A": "ASME B16.5 (American)",
-                "D": "EN 1092-1 (European)",
-                "T": "GOST 33259-15 (Russian)",
-                "J": "JIS B2238 (Japanese)",
-                "G": "HG20615 (Chinese-ASME based)",
-                "K": "HG20592 (Chinese-EN based)",
-                "S": "Hygienic (3-A Standard 74-06)",
-                "N": "Non-industry standard"
-            },
-            "Manufacturing standard to follow")
         
         # Process Connection Size
         row = self.add_dropdown(scrollable_frame, row, "Process Connection Size", "conn_size",
@@ -441,26 +424,278 @@ class RosemountConfigurator:
         dropdown.grid(row=row, column=1, sticky="w", pady=5)
         
         # Store reference
-        self.selections[key] = {"var": var, "options": options, "widget": dropdown}
+        self.selections[key] = {"var": var, "options": options, "widget": dropdown, "label": label, "desc": None}
         
         # Description
         desc_label = ttk.Label(parent, text=description, font=("Arial", 8), 
                               foreground="gray")
         desc_label.grid(row=row+1, column=1, sticky="w", pady=(0,5))
+        self.selections[key]["desc"] = desc_label
         
         return row + 2
+    
+    def add_connection_type_dropdown(self, parent, row):
+        """Add connection type dropdown that changes based on mount type"""
+        # Label
+        label = ttk.Label(parent, text="Connection Type:", font=("Arial", 10, "bold"))
+        label.grid(row=row, column=0, sticky="w", pady=5, padx=(0,10))
+        
+        # Dropdown
+        var = tk.StringVar()
+        dropdown = ttk.Combobox(parent, textvariable=var, width=50, state="readonly")
+        dropdown.grid(row=row, column=1, sticky="w", pady=5)
+        
+        # Store reference
+        self.selections["connection"] = {"var": var, "options": {}, "widget": dropdown, "label": label, "desc": None}
+        
+        # Description
+        desc_label = ttk.Label(parent, text="", font=("Arial", 8), foreground="gray")
+        desc_label.grid(row=row+1, column=1, sticky="w", pady=(0,5))
+        self.selections["connection"]["desc"] = desc_label
+        
+        # Initialize with Remote Mount options
+        self.update_connection_type_options()
+        
+        return row + 2
+    
+    def add_capillary_or_direct_dropdown(self, parent, row):
+        """Add capillary type (Remote) or direct mount connection (Direct) dropdown"""
+        # Label
+        label = ttk.Label(parent, text="", font=("Arial", 10, "bold"))
+        label.grid(row=row, column=0, sticky="w", pady=5, padx=(0,10))
+        
+        # Dropdown
+        var = tk.StringVar()
+        dropdown = ttk.Combobox(parent, textvariable=var, width=50, state="readonly")
+        dropdown.grid(row=row, column=1, sticky="w", pady=5)
+        
+        # Store reference
+        self.selections["capillary"] = {"var": var, "options": {}, "widget": dropdown, "label": label, "desc": None}
+        
+        # Description
+        desc_label = ttk.Label(parent, text="", font=("Arial", 8), foreground="gray")
+        desc_label.grid(row=row+1, column=1, sticky="w", pady=(0,5))
+        self.selections["capillary"]["desc"] = desc_label
+        
+        # Initialize with Remote Mount options
+        self.update_capillary_or_direct_options()
+        
+        return row + 2
+    
+    def add_seal_connection_type_dropdown(self, parent, row):
+        """Add seal connection type dropdown (only for Direct Mount)"""
+        # Label
+        label = ttk.Label(parent, text="Seal Connection Type:", font=("Arial", 10, "bold"))
+        label.grid(row=row, column=0, sticky="w", pady=5, padx=(0,10))
+        
+        # Dropdown
+        var = tk.StringVar()
+        dropdown = ttk.Combobox(parent, textvariable=var, width=50, state="readonly")
+        seal_conn_options = {
+            "A": "Direct mount"
+        }
+        dropdown['values'] = [f"{code} - {desc}" for code, desc in seal_conn_options.items()]
+        dropdown.grid(row=row, column=1, sticky="w", pady=5)
+        
+        # Store reference
+        self.selections["seal_conn"] = {"var": var, "options": seal_conn_options, "widget": dropdown, 
+                                        "label": label, "desc": None}
+        
+        # Description
+        desc_label = ttk.Label(parent, text="Seal connection type (Direct Mount only)",
+                              font=("Arial", 8), foreground="gray")
+        desc_label.grid(row=row+1, column=1, sticky="w", pady=(0,5))
+        self.selections["seal_conn"]["desc"] = desc_label
+        
+        # Initially hidden (only shown for Direct Mount)
+        label.grid_remove()
+        dropdown.grid_remove()
+        desc_label.grid_remove()
+        
+        return row + 2
+    
+    def add_capillary_length_dropdown(self, parent, row):
+        """Add capillary length dropdown (only for Remote Mount)"""
+        # Label
+        label = ttk.Label(parent, text="Capillary Length:", font=("Arial", 10, "bold"))
+        label.grid(row=row, column=0, sticky="w", pady=5, padx=(0,10))
+        
+        # Dropdown
+        var = tk.StringVar()
+        dropdown = ttk.Combobox(parent, textvariable=var, width=50, state="readonly")
+        cap_length_options = {
+            "01": "1.0 ft. (0.3 m)",
+            "05": "5.0 ft. (1.5 m)",
+            "10": "10.0 ft. (3.0 m)",
+            "15": "15.0 ft. (4.5 m)",
+            "20": "20.0 ft. (6.1 m)",
+            "25": "25.0 ft. (7.6 m)",
+            "30": "30.0 ft. (9.1 m)",
+            "40": "40.0 ft. (12.2 m)",
+            "50": "50.0 ft. (15.2 m)",
+            "51": "1.6 ft. (0.5 m)",
+            "52": "3.3 ft. (1.0 m)",
+            "53": "4.9 ft. (1.5 m)",
+            "54": "6.6 ft. (2.0 m)",
+            "55": "8.2 ft. (2.5 m)",
+            "56": "9.8 ft. (3.0 m)",
+            "57": "11.5 ft. (3.5 m)",
+            "58": "13.1 ft. (4.0 m)",
+            "59": "16.4 ft. (5.0 m)",
+            "60": "19.7 ft. (6.0 m)"
+        }
+        dropdown['values'] = [f"{code} - {desc}" for code, desc in cap_length_options.items()]
+        dropdown.grid(row=row, column=1, sticky="w", pady=5)
+        
+        # Store reference
+        self.selections["cap_length"] = {"var": var, "options": cap_length_options, "widget": dropdown, 
+                                         "label": label, "desc": None}
+        
+        # Description
+        desc_label = ttk.Label(parent, text="Length of capillary tubing (Remote Mount only)",
+                              font=("Arial", 8), foreground="gray")
+        desc_label.grid(row=row+1, column=1, sticky="w", pady=(0,5))
+        self.selections["cap_length"]["desc"] = desc_label
+        
+        return row + 2
+    
+    def update_connection_type_options(self):
+        """Update connection type options based on mount type"""
+        mount_type = self.mount_type.get()
+        
+        if mount_type == "Remote":
+            options = {
+                "W": "Welded-repairable (High side)",
+                "M": "Welded-repairable (Low side)",
+                "D": "Welded-repairable (Balanced system)",
+                "A": "All welded, capillary (High side)",
+                "B": "All welded, capillary (Two seal system)",
+                "C": "All welded, capillary (Low side)"
+            }
+            description = "Type of seal system and location on transmitter"
+        else:  # Direct Mount
+            options = {
+                "W": "Welded-repairable (High side) - Coplanar devices",
+                "R": "All welded, one seal (High side) - Coplanar devices",
+                "T": "All welded, two seal (High side) - Coplanar devices",
+                "W_INLINE": "All welded, one seal - In-line devices"
+            }
+            description = "Connection type and seal location (varies by transmitter type)"
+        
+        self.selections["connection"]["options"] = options
+        self.selections["connection"]["widget"]['values'] = [f"{code} - {desc}" for code, desc in options.items()]
+        self.selections["connection"]["desc"].config(text=description)
+        self.selections["connection"]["var"].set("")
+    
+    def update_capillary_or_direct_options(self):
+        """Update capillary/direct mount connection options based on mount type"""
+        mount_type = self.mount_type.get()
+        
+        if mount_type == "Remote":
+            options = {
+                "B": "0.03-in. (0.711 mm) ID",
+                "C": "0.04-in. (1.092 mm) ID",
+                "D": "0.075-in. (1.905 mm) ID",
+                "E": "0.03-in. ID, PVC coated with closed end",
+                "F": "0.04-in. ID, PVC coated with closed end",
+                "G": "0.075-in. ID, PVC coated with closed end",
+                "H": "0.03-in. ID, 4-in. support tube",
+                "J": "0.04-in. ID, 4-in. support tube",
+                "K": "0.075-in. ID, 4-in. support tube",
+                "M": "0.03-in. ID, PVC coated, 4-in. support tube",
+                "N": "0.04-in. ID, PVC coated, 4-in. support tube",
+                "P": "0.075-in. ID, PVC coated, 4-in. support tube"
+            }
+            label_text = "Capillary Type"
+            description = "Capillary internal diameter and coating"
+        else:  # Direct Mount
+            options = {
+                # Coplanar one-seal system (Welded-repairable)
+                "93": "Direct mount, no extension - Welded-repairable, Coplanar one-seal",
+                "B3": "Direct mount, 2-in. (50 mm) extension - Welded-repairable, Coplanar one-seal",
+                "D3": "Direct mount, 4-in. (100 mm) extension - Welded-repairable, Coplanar one-seal",
+                # Coplanar one-seal system (All welded)
+                "97": "Direct mount, no extension - All welded, Coplanar one-seal",
+                "B7": "Direct mount, 2-in. (50 mm) extension - All welded, Coplanar one-seal",
+                "D7": "Direct mount, 4-in. (100 mm) extension - All welded, Coplanar one-seal",
+                # Coplanar Tuned-System (Welded-repairable)
+                "94": "Direct mount, no extension - Welded-repairable, Tuned-System",
+                "B4": "Direct mount, 2-in. (50 mm) extension - Welded-repairable, Tuned-System",
+                "D4": "Direct mount, 4-in. (100 mm) extension - Welded-repairable, Tuned-System",
+                # Coplanar Tuned-System (All welded)
+                "96": "Direct mount, no extension - All welded, Tuned-System",
+                "B6": "Direct mount, 2-in. (50 mm) extension - All welded, Tuned-System",
+                "D6": "Direct mount, 4-in. (100 mm) extension - All welded, Tuned-System",
+                # In-line devices
+                "95": "Direct mount, no extension - All welded, In-line one-seal",
+                "C5": "Direct mount, 4-in. (100 mm) extension - All welded, In-line one-seal",
+                "D5": "Direct mount, Thermal Optimizer - All welded, In-line one-seal"
+            }
+            label_text = "Direct Mount Connection Type"
+            description = "Direct mount connection type with extension length (includes seal system type)"
+        
+        self.selections["capillary"]["options"] = options
+        self.selections["capillary"]["widget"]['values'] = [f"{code} - {desc}" for code, desc in options.items()]
+        self.selections["capillary"]["label"].config(text=f"{label_text}:")
+        self.selections["capillary"]["desc"].config(text=description)
+        self.selections["capillary"]["var"].set("")
+    
+    def on_mount_type_change(self):
+        """Handle mount type change - update relevant dropdowns"""
+        mount_type = self.mount_type.get()
+        
+        # Update connection type options
+        self.update_connection_type_options()
+        
+        # Update capillary/direct mount options
+        self.update_capillary_or_direct_options()
+        
+        # Show/hide fields based on mount type
+        if mount_type == "Remote":
+            # Hide seal connection type (Direct Mount only)
+            self.selections["seal_conn"]["label"].grid_remove()
+            self.selections["seal_conn"]["widget"].grid_remove()
+            self.selections["seal_conn"]["desc"].grid_remove()
+            self.selections["seal_conn"]["var"].set("")
+            
+            # Show capillary length
+            self.selections["cap_length"]["label"].grid()
+            self.selections["cap_length"]["widget"].grid()
+            self.selections["cap_length"]["desc"].grid()
+        else:  # Direct Mount
+            # Show seal connection type
+            self.selections["seal_conn"]["label"].grid()
+            self.selections["seal_conn"]["widget"].grid()
+            self.selections["seal_conn"]["desc"].grid()
+            # Auto-select "A" if not already set
+            if not self.selections["seal_conn"]["var"].get():
+                self.selections["seal_conn"]["var"].set("A - Direct mount")
+            
+            # Hide capillary length
+            self.selections["cap_length"]["label"].grid_remove()
+            self.selections["cap_length"]["widget"].grid_remove()
+            self.selections["cap_length"]["desc"].grid_remove()
+            self.selections["cap_length"]["var"].set("")
     
     def generate_model(self):
         """Generate the complete model number"""
         model_parts = []
         missing = []
+        mount_type = self.mount_type.get()
         
-        # Required fields in order
-        required_order = [
-            "model", "connection", "fill_fluid", "capillary", "cap_length",
-            "seal_type", "standard", "conn_size", "pressure", "diaphragm",
-            "lower_housing", "flushing"
-        ]
+        # Required fields in order (varies by mount type)
+        if mount_type == "Remote":
+            required_order = [
+                "model", "connection", "fill_fluid", "capillary", "cap_length",
+                "standard", "seal_type", "conn_size", "pressure", "diaphragm",
+                "lower_housing", "flushing"
+            ]
+        else:  # Direct Mount
+            required_order = [
+                "model", "connection", "fill_fluid", "seal_conn", "capillary",  # seal_conn is "A", capillary is direct mount connection code
+                "standard", "seal_type", "conn_size", "pressure", "diaphragm",
+                "lower_housing", "flushing"
+            ]
         
         # Optional fields in order
         optional_order = [
@@ -471,10 +706,17 @@ class RosemountConfigurator:
         
         # Process required fields
         for key in required_order:
+            # Skip cap_length for Direct Mount (it's included in capillary code)
+            if mount_type == "Direct" and key == "cap_length":
+                continue
+                
             value = self.selections[key]["var"].get()
             if value:
                 # Extract code (first part before " - ")
                 code = value.split(" - ")[0]
+                # Handle special case for Direct Mount connection type
+                if mount_type == "Direct" and key == "connection" and code == "W_INLINE":
+                    code = "W"  # Use W for in-line devices
                 model_parts.append(code)
             else:
                 # Use field name for missing items
@@ -482,7 +724,8 @@ class RosemountConfigurator:
                     "model": "Model",
                     "connection": "Connection Type",
                     "fill_fluid": "Fill Fluid",
-                    "capillary": "Capillary Type",
+                    "seal_conn": "Seal Connection Type",
+                    "capillary": "Capillary Type" if mount_type == "Remote" else "Direct Mount Connection",
                     "cap_length": "Capillary Length",
                     "seal_type": "Seal Assembly Type",
                     "standard": "Industry Standard",
@@ -534,10 +777,12 @@ class RosemountConfigurator:
         
         # Display result
         self.result_text.delete(1.0, tk.END)
-        self.result_text.insert(1.0, f"Complete Model Number:\n\n{model_number}\n\n")
+        mount_type_display = "Remote Mount" if mount_type == "Remote" else "Direct Mount"
+        self.result_text.insert(1.0, f"Complete Model Number ({mount_type_display}):\n\n{model_number}\n\n")
         
         # Add summary
-        summary = f"Base Configuration: {len(model_parts)} codes\n"
+        summary = f"Mount Type: {mount_type_display}\n"
+        summary += f"Base Configuration: {len(model_parts)} codes\n"
         if optional_codes:
             summary += f"Optional Codes: {len(optional_codes)} selected\n"
             summary += f"Options: {', '.join(optional_codes)}\n\n"
@@ -545,57 +790,103 @@ class RosemountConfigurator:
             summary += "Optional Codes: None selected\n\n"
         
         self.result_text.insert(tk.END, summary)
-        self.result_text.insert(tk.END, "Note: Additional transmitter model required for complete order.")
+        if mount_type == "Direct":
+            self.result_text.insert(tk.END, "Note: Direct Mount requires specification of a Rosemount pressure device.\n")
+            self.result_text.insert(tk.END, "Add seal system ordering code (B11/B12/S1/S2) to transmitter model.\n")
+            self.result_text.insert(tk.END, "See Table 1 in datasheet for correct code per transmitter model.")
+        else:
+            self.result_text.insert(tk.END, "Note: Additional transmitter model required for complete order.")
     
     def validate_configuration(self, parts):
         """Validate the model configuration for compatibility issues"""
         errors = []
+        mount_type = self.mount_type.get()
         
         # Extract key components (adjust indices based on required_order)
         connection_type = parts[1] if len(parts) > 1 else ""
         fill_fluid = parts[2] if len(parts) > 2 else ""
-        capillary = parts[3] if len(parts) > 3 else ""
-        diaphragm = parts[9] if len(parts) > 9 else ""
+        
+        # For Direct Mount, seal_conn is at index 3, capillary at index 4
+        # For Remote Mount, capillary is at index 3
+        if mount_type == "Direct":
+            capillary = parts[4] if len(parts) > 4 else ""
+            diaphragm = parts[9] if len(parts) > 9 else ""
+        else:  # Remote Mount
+            capillary = parts[3] if len(parts) > 3 else ""
+            diaphragm = parts[9] if len(parts) > 9 else ""
         
         # Rule 1: All welded connection types require 316L SST or Alloy C-276 diaphragm
-        if connection_type in ["A", "B", "C"]:
-            if not any(diaphragm.startswith(x) for x in ["CA", "DA", "CB", "DB", "LA", "LB"]):
-                errors.append("All welded connection types (A, B, C) require 316L SST or Alloy C-276 diaphragm material")
+        if mount_type == "Remote":
+            if connection_type in ["A", "B", "C"]:
+                if not any(diaphragm.startswith(x) for x in ["CA", "DA", "CB", "DB", "LA", "LB"]):
+                    errors.append("All welded connection types (A, B, C) require 316L SST or Alloy C-276 diaphragm material")
+        else:  # Direct Mount
+            if connection_type in ["R", "T"]:
+                if not any(diaphragm.startswith(x) for x in ["CA", "DA", "CB", "DB", "LA", "LB"]):
+                    errors.append("All welded Direct Mount connection types (R, T) require 316L SST or Alloy C-276 diaphragm material")
         
-        # Rule 2: PVC coated capillaries cannot exceed 212°F (100°C)
-        if capillary in ["E", "F", "G", "M", "N", "P"]:
-            high_temp_fluids = ["J", "Q", "L", "C", "R", "V"]  # Fluids that can exceed 212°F
-            if fill_fluid in high_temp_fluids:
-                errors.append("PVC coated capillaries (E, F, G, M, N, P) cannot be used with fill fluids exceeding 212°F. Choose non-PVC capillary.")
-        
-        # Rule 3: Silicone 704 only available with certain capillary types
-        if fill_fluid in ["L", "C"]:
-            if capillary not in ["C", "D", "F", "G", "J", "K", "N", "P"]:
-                errors.append("Silicone 704 fill fluid (L, C) only available with capillary codes C, D, F, G, J, K, N, P")
-        
-        # Rule 4: Silicone 705 only available with certain capillary types
-        if fill_fluid in ["R", "V"]:
-            if capillary not in ["D", "G", "K", "P"]:
-                errors.append("Silicone 705 fill fluid (R, V) only available with capillary codes D, G, K, P")
+        # Rules 2-4: Only apply to Remote Mount (capillary-related)
+        if mount_type == "Remote":
+            # Rule 2: PVC coated capillaries cannot exceed 212°F (100°C)
+            if capillary in ["E", "F", "G", "M", "N", "P"]:
+                high_temp_fluids = ["J", "Q", "L", "C", "R", "V"]  # Fluids that can exceed 212°F
+                if fill_fluid in high_temp_fluids:
+                    errors.append("PVC coated capillaries (E, F, G, M, N, P) cannot be used with fill fluids exceeding 212°F. Choose non-PVC capillary.")
+            
+            # Rule 3: Silicone 704 only available with certain capillary types
+            if fill_fluid in ["L", "C"]:
+                if capillary not in ["C", "D", "F", "G", "J", "K", "N", "P"]:
+                    errors.append("Silicone 704 fill fluid (L, C) only available with capillary codes C, D, F, G, J, K, N, P")
+            
+            # Rule 4: Silicone 705 only available with certain capillary types
+            if fill_fluid in ["R", "V"]:
+                if capillary not in ["D", "G", "K", "P"]:
+                    errors.append("Silicone 705 fill fluid (R, V) only available with capillary codes D, G, K, P")
         
         # Rule 5: Glycerine and Propylene Glycol not suitable for vacuum
         if fill_fluid in ["G", "P"]:
             errors.append("WARNING: Glycerine (G) and Propylene Glycol (P) are not suitable for vacuum applications")
         
-        # Rule 6: Titanium RH diaphragm not available with welded capillary or direct mount
+        # Rule 6: Titanium RH diaphragm restrictions
         if diaphragm == "RH":
-            if connection_type in ["A", "B", "C"]:
-                errors.append("Titanium Gr. 4 (RH) diaphragm not available with all welded connection types (A, B, C)")
+            if mount_type == "Remote":
+                if connection_type in ["A", "B", "C"]:
+                    errors.append("Titanium Gr. 4 (RH) diaphragm not available with all welded connection types (A, B, C)")
+            else:  # Direct Mount
+                if connection_type in ["R", "T"]:
+                    errors.append("Titanium Gr. 4 (RH) diaphragm not available with all welded Direct Mount connection types (R, T)")
+        
+        # Rule 7: Direct Mount specific - connection type must match direct mount code
+        if mount_type == "Direct":
+            # Check if connection type matches the direct mount code
+            # W is used for: 93/B3/D3 (welded-repairable coplanar), 94/B4/D4 (welded-repairable Tuned-System), 95/C5/D5 (in-line)
+            if capillary.startswith("97") or capillary.startswith("B7") or capillary.startswith("D7"):
+                if connection_type != "R":
+                    errors.append("Direct mount codes 97/B7/D7 require connection type R (All welded, one seal)")
+            elif capillary.startswith("96") or capillary.startswith("B6") or capillary.startswith("D6"):
+                if connection_type != "T":
+                    errors.append("Direct mount codes 96/B6/D6 require connection type T (All welded, two seal)")
+            elif capillary.startswith("93") or capillary.startswith("B3") or capillary.startswith("D3") or \
+                 capillary.startswith("94") or capillary.startswith("B4") or capillary.startswith("D4") or \
+                 capillary.startswith("95") or capillary.startswith("C5") or capillary.startswith("D5"):
+                if connection_type not in ["W", "W_INLINE"]:
+                    errors.append("Direct mount codes 93/B3/D3/94/B4/D4/95/C5/D5 require connection type W")
         
         return errors
     
     def validate_optional_codes(self, base_parts, optional_codes):
         """Validate optional codes against base configuration"""
         errors = []
+        mount_type = self.mount_type.get()
         
-        # Extract key components
-        diaphragm = base_parts[9] if len(base_parts) > 9 else ""
-        seal_type = base_parts[5] if len(base_parts) > 5 else ""
+        # Extract key components (adjust index for Direct Mount)
+        # seal_type is now at index 6 (after standard at index 5)
+        if mount_type == "Direct":
+            diaphragm = base_parts[9] if len(base_parts) > 9 else ""
+            seal_type = base_parts[6] if len(base_parts) > 6 else ""
+        else:  # Remote Mount
+            diaphragm = base_parts[9] if len(base_parts) > 9 else ""
+            seal_type = base_parts[6] if len(base_parts) > 6 else ""
         
         # Rule 1: Diaphragm coating only available on certain materials
         coating_codes = [c for c in optional_codes if c in ["Z", "V", "FP"]]

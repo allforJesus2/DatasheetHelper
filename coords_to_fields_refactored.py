@@ -14,6 +14,8 @@ class CoordsToFieldsGenerator:
         self.wb = None
         self.coords_window = None
         self.region_cache = None  # Will store internal representation of data region
+        self.update_entry_id = None  # Store the after() callback ID to cancel it
+        self.is_closing = False  # Flag to prevent update_entry from scheduling more calls
 
     def generate(self):
         if not self.xlsx_path:
@@ -117,7 +119,7 @@ class CoordsToFieldsGenerator:
         # Center the window over the parent window
         center_window_over_parent(self.coords_window)
         
-        self.coords_window.after(200, self.update_entry)
+        self.update_entry_id = self.coords_window.after(200, self.update_entry)
 
     def add_manual(self):
         """Add coordinates using manual mode (extracts both left & top headers)"""
@@ -985,6 +987,10 @@ class CoordsToFieldsGenerator:
             self.listbox.insert(tk.END, f"{key}: {value}")
 
     def update_entry(self):
+        # Stop polling if we're closing
+        if self.is_closing:
+            return
+            
         try:
             # Check if workbook is still open
             if not self._is_workbook_open():
@@ -1004,7 +1010,10 @@ class CoordsToFieldsGenerator:
                 print("Excel workbook appears to be closed, closing coordinate mapper...")
                 self.on_closing()
                 return
-        self.coords_window.after(200, self.update_entry)
+        
+        # Only schedule next update if not closing
+        if not self.is_closing:
+            self.update_entry_id = self.coords_window.after(200, self.update_entry)
 
     def _is_workbook_open(self):
         """Check if the Excel workbook is still open and accessible"""
@@ -1021,12 +1030,26 @@ class CoordsToFieldsGenerator:
             return False
 
     def on_closing(self):
+        # Prevent update_entry from scheduling more calls
+        self.is_closing = True
+        
+        # Cancel the update_entry polling if it's scheduled
+        if self.update_entry_id and self.coords_window:
+            try:
+                self.coords_window.after_cancel(self.update_entry_id)
+            except Exception as e:
+                print(f"Error canceling update_entry callback: {e}")
+        
+        # Close workbook (this can be slow, but we've stopped polling)
         if self.wb:
             try:
                 self.wb.close()
             except Exception as e:
                 print(f"Error closing workbook: {e}")
-        self.coords_window.destroy()
+        
+        # Destroy the window
+        if self.coords_window:
+            self.coords_window.destroy()
 
     def get_result(self):
         return self.coords_dict

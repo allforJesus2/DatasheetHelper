@@ -1,14 +1,15 @@
 {
-    "file_path": "//stor-dn-01.se.local/projects/Projects/24317_Electra_CO_EPCM/Engineering/Instrumentation/DataSheets/VALVES/SPEC-IC-205-CV-3 STD Control Valve (Modulating Ball) - SwissFluid.xlsx",
-    "init_tag_coord": "i12",
-    "init_coords_to_fields": "{'I12': 'TAG NUMBER', 'I13': 'SERVICE', 'I14': 'P&ID', 'I15': 'MANUFACTURER', 'I16': 'MODEL NUMBER', 'I18': 'LINE NUMBER', 'I53': 'Q = LIQUID FLOW RATE (L/min)_Q MIN', 'J53': 'Q = LIQUID FLOW RATE (L/min)_Q NORM', 'L53': 'Q = LIQUID FLOW RATE (L/min)_Q MAX', 'I54': 'P1 (kPag)_Q MIN', 'J54': 'P1 (kPag)_Q NORM', 'L54': 'P1 (kPag)_Q MAX', 'I55': 'P2 (kPag)_Q MIN', 'J55': 'P2 (kPag)_Q NORM', 'L55': 'P2 (kPag)_Q MAX', 'I56': 'TEMP (\u00b0C)_Q MIN', 'J56': 'TEMP (\u00b0C)_Q NORM', 'L56': 'TEMP (\u00b0C)_Q MAX', 'I57': 'SPECIFIC GRAVITY @ O.C._Q MIN', 'J57': 'SPECIFIC GRAVITY @ O.C._Q NORM', 'L57': 'SPECIFIC GRAVITY @ O.C._Q MAX', 'I58': 'DENSITY @ O.C. (kg/m\u00b3)_Q MIN', 'J58': 'DENSITY @ O.C. (kg/m\u00b3)_Q NORM', 'L58': 'DENSITY @ O.C. (kg/m\u00b3)_Q MAX', 'I59': 'VAPOR PRESS (kPaa) (LIQUID)_Q MIN', 'J59': 'VAPOR PRESS (kPaa) (LIQUID)_Q NORM', 'L59': 'VAPOR PRESS (kPaa) (LIQUID)_Q MAX', 'I60': 'SPECIFIC HEAT RATIO [NON-LIQUID]_Q MIN', 'J60': 'SPECIFIC HEAT RATIO [NON-LIQUID]_Q NORM', 'L60': 'SPECIFIC HEAT RATIO [NON-LIQUID]_Q MAX', 'I61': 'CV_Q MIN', 'J61': 'CV_Q NORM', 'L61': 'CV_Q MAX', 'I62': 'VALVE POSITION (DEG OPEN)_Q MIN', 'J62': 'VALVE POSITION (DEG OPEN)_Q NORM', 'L62': 'VALVE POSITION (DEG OPEN)_Q MAX', 'V63': 'DESIGN PRESS.(kPag) / TEMP.  (\u00b0C)'}",
-    "tags_per_sheet": "1",
+    "file_path": "//stor-dn-01.se.local/projects/Projects/24317_Electra_CO_EPCM/Engineering/Instrumentation/DataSheets/TT Temperature Transmitters_WORKING DC.xlsx",
+    "init_tag_coord": "C41",
+    "init_coords_to_fields": "{'C41': 'TRANSMITTER TAG NO.', 'E41': 'P&ID', 'H41': 'CALIBRATED RANGE (C)', 'I41': 'OPER. TEMP.\\n(\u00b0C)', 'L41': 'DESIGN TEMP.\\n(\u00b0C)', 'O41': 'LINE / VESSEL NO.', 'R41': 'SERVICE', 'U41': 'PROCESS FLUID', 'W41': 'TRANSMITTER\\nMODEL NO.', 'C48': 'SENSOR/WELL\\nTAG NO.', 'E48': 'PROCESS CONNECTION', 'F48': 'INSERTION LEN. \\n \"U\" dim.', 'I48': 'HEAD LENGTH', 'K48': 'STEM LENGTH', 'M48': 'OPER. PRESS.\\n(kPag)', 'O48': 'OPER. VELOCITY\\n(m/s)', 'R48': 'SPECIFIC GRAVITY', 'S48': 'RTD/THERMOWELL MODEL NO.', 'X48': 'NOTES', 'AB41': 'WATER'}",
+    "tags_per_sheet": "6",
     "selected_sheets": [
-        "PCV-1227B",
-        "PCV-1671A",
-        "PCV-1659",
-        "PRV-1667",
-        "PCV-1071B",
-        "PCV-1451"
+        "DS-IC-TT-01",
+        "DS-IC-TT-02",
+        "DS-IC-TT-03",
+        "DS-IC-TT-04",
+        "DS-IC-TT-05",
+        "DS-IC-TT-07",
+        "DS-IC-TT-06"
     ]
 }
