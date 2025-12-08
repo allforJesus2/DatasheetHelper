@@ -15,6 +15,7 @@ print("DEBUG: Importing standard libraries...")
 import json
 import re
 import os
+import sys
 # Set environment variable to handle OpenMP runtime conflict
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
@@ -25,7 +26,7 @@ print("DEBUG: Importing Data_Extraction...")
 from Data_Extraction import DatasheetExtractor
 
 print("DEBUG: Importing xlsx_search...")
-from xlsx_search import ExcelSearchApp
+from utilities.xlsx_search import ExcelSearchApp
 
 print("DEBUG: Importing edit_xlsx...")
 from edit_xlsx import ExcelEditorApp
@@ -41,12 +42,19 @@ from excel_manager import *
 
 print("DEBUG: Importing openpyxl...")
 import openpyxl
+from openpyxl.styles import Font
 
 print("DEBUG: Importing excel_macro_viewer...")
 from excel_macro_viewer import ExcelMacroViewer # Add this import
 
 print("DEBUG: Importing excel_regex_search...")
-from excel_regex_search import ExcelRegexSearchApp
+from utilities.excel_regex_search import ExcelRegexSearchApp
+
+print("DEBUG: Importing pyperclip...")
+import pyperclip
+
+print("DEBUG: Importing subprocess...")
+import subprocess
 
 # Semantic matcher will be imported lazily when needed
 
@@ -228,6 +236,18 @@ class DatasheetGeneratorApp:
         self.root = root
         print("DEBUG: Setting window title...")
         self.root.title("Datasheet Helper App")
+        
+        # Configure Notebook tab styles to make non-selected tabs darker
+        style = ttk.Style()
+        # Configure default tab styling
+        style.configure("TNotebook.Tab", 
+                       padding=[10, 5])
+        # Map styles based on tab state: selected vs non-selected
+        style.map("TNotebook.Tab",
+                 background=[("selected", "#ffffff"), ("!selected", "#101010")],
+                 foreground=[("selected", "blue"), ("!selected", "black")],
+                 expand=[("selected", [1, 1, 1, 0])])
+        
         print("DEBUG: Creating ExcelManager...")
         self.excel_mgr = ExcelManager()
         print("DEBUG: Initializing basic attributes...")
@@ -303,8 +323,8 @@ class DatasheetGeneratorApp:
         # Start centralized Excel monitoring
         self.start_excel_monitoring()
         
-        # Auto-load the last settings file if it exists
-        self.auto_load_last_settings()
+        # Auto-load the last settings file if it exists (deferred until after window is ready)
+        self.root.after_idle(self.auto_load_last_settings)
     
 
     
@@ -750,13 +770,16 @@ class DatasheetGeneratorApp:
         
         # Create main tab for this data source
         data_source_tab = ttk.Frame(self.data_sources_notebook)
-        self.data_sources_notebook.add(data_source_tab, text=data_source)
+        tab_index = self.data_sources_notebook.add(data_source_tab, text=data_source)
         
         # Create the data source tab content
         self.create_data_source_tab_content(data_source_tab, data_source, config)
         
         # Update tab indicators (this doesn't affect entries)
         self.update_all_tab_indicators()
+        
+        # Activate the newly added tab (use select_data_source_tab to handle indicators)
+        self.select_data_source_tab(data_source)
         
         print(f"Added new tab for data source: {data_source}")
 
@@ -984,7 +1007,7 @@ class DatasheetGeneratorApp:
         clear_search_btn.pack(side="left")
         
         # Button to open a list of datasources and switch tabs
-        switch_btn = ttk.Button(search_frame, text="Switch…", width=9, 
+        switch_btn = ttk.Button(search_frame, text="Find/Select tab", width=9, 
                                 command=self.open_data_source_switcher)
         switch_btn.pack(side="left", padx=(5, 0))
         
@@ -1309,10 +1332,10 @@ class DatasheetGeneratorApp:
         # Create context menu
         context_menu = tk.Menu(self.root, tearoff=0)
         context_menu.add_command(label="Rename data source", 
-                               command=lambda: self.rename_data_source(data_source))
+                               command=lambda ds=data_source: self.rename_data_source(ds))
         context_menu.add_separator()
         context_menu.add_command(label="Delete data source", 
-                               command=lambda: self.delete_data_source(data_source))
+                               command=lambda ds=data_source: self.delete_data_source(ds))
         
         # Show the context menu
         try:
@@ -1727,22 +1750,22 @@ class DatasheetGeneratorApp:
         
         # Datasheets Row
         ds_frame = tk.Frame(left_section)
-        ds_frame.pack(fill=tk.X, pady=2)
+        ds_frame.pack(fill=tk.X, pady=1)
         
         # Help button
         ds_help_btn = tk.Button(ds_frame, text="?", width=2, 
                                 command=lambda: self.show_help("datasheets_destination.txt"))
-        ds_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        ds_help_btn.pack(side=tk.LEFT, padx=(2, 1))
         
-        ds_label = tk.Label(ds_frame, text="Datasheets (Destination)", width=30)
-        ds_label.pack(side=tk.LEFT, padx=(0, 5))
+        ds_label = tk.Label(ds_frame, text="Datasheets (Destination)", width=25, anchor="w")
+        ds_label.pack(side=tk.LEFT, padx=(0, 1))
         
         ds_entry = tk.Entry(ds_frame)
         ds_entry._destination = destination
         ds_entry._variable_name = "datasheets"
         if config.get('path'):
             ds_entry.insert(0, config['path'])
-        ds_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        ds_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         
         # Store reference to datasheet entry
         if destination not in self.destination_widgets:
@@ -1759,97 +1782,97 @@ class DatasheetGeneratorApp:
         
         # Datasheet Coordinate Row
         coord_frame = tk.Frame(left_section)
-        coord_frame.pack(fill=tk.X, pady=2)
+        coord_frame.pack(fill=tk.X, pady=1)
         
         coord_help_btn = tk.Button(coord_frame, text="?", width=2, 
                                    command=lambda: self.show_help("datasheet_coordinate.txt"))
-        coord_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        coord_help_btn.pack(side=tk.LEFT, padx=(2, 1))
         
-        coord_label = tk.Label(coord_frame, text="Datasheet Coordinate", width=30)
-        coord_label.pack(side=tk.LEFT, padx=(0, 5))
+        coord_label = tk.Label(coord_frame, text="Datasheet Coordinate", width=25, anchor="w")
+        coord_label.pack(side=tk.LEFT, padx=(0, 1))
         
         coord_entry = tk.Entry(coord_frame)
         coord_entry._destination = destination
         coord_entry._variable_name = "datasheet_coord"
         if config.get('datasheet_coord'):
             coord_entry.insert(0, config['datasheet_coord'])
-        coord_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        coord_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.destination_widgets[destination]['datasheet_coord_entry'] = coord_entry
         
         # Datasheet Prefix Row
         prefix_frame = tk.Frame(left_section)
-        prefix_frame.pack(fill=tk.X, pady=2)
+        prefix_frame.pack(fill=tk.X, pady=1)
         
         prefix_help_btn = tk.Button(prefix_frame, text="?", width=2, 
                                     command=lambda: self.show_help("datasheet_prefix.txt"))
-        prefix_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        prefix_help_btn.pack(side=tk.LEFT, padx=(2, 1))
         
-        prefix_label = tk.Label(prefix_frame, text="Datasheet Prefix", width=30)
-        prefix_label.pack(side=tk.LEFT, padx=(0, 5))
+        prefix_label = tk.Label(prefix_frame, text="Datasheet Prefix", width=25, anchor="w")
+        prefix_label.pack(side=tk.LEFT, padx=(0, 1))
         
         prefix_entry = tk.Entry(prefix_frame)
         prefix_entry._destination = destination
         prefix_entry._variable_name = "ds_str"
         if config.get('ds_str'):
             prefix_entry.insert(0, config['ds_str'])
-        prefix_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        prefix_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.destination_widgets[destination]['ds_str_entry'] = prefix_entry
         
         # Rows per Sheet Row
         rows_frame = tk.Frame(left_section)
-        rows_frame.pack(fill=tk.X, pady=2)
+        rows_frame.pack(fill=tk.X, pady=1)
         
         rows_help_btn = tk.Button(rows_frame, text="?", width=2, 
                                   command=lambda: self.show_help("rows_per_sheet.txt"))
-        rows_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        rows_help_btn.pack(side=tk.LEFT, padx=(2, 1))
         
-        rows_label = tk.Label(rows_frame, text="Rows per Sheet", width=30)
-        rows_label.pack(side=tk.LEFT, padx=(0, 5))
+        rows_label = tk.Label(rows_frame, text="Rows per Sheet", width=25, anchor="w")
+        rows_label.pack(side=tk.LEFT, padx=(0, 1))
         
         rows_entry = tk.Entry(rows_frame)
         rows_entry._destination = destination
         rows_entry._variable_name = "rows_per_sheet"
         if config.get('rows_per_sheet'):
             rows_entry.insert(0, str(config['rows_per_sheet']))
-        rows_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        rows_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.destination_widgets[destination]['rows_per_sheet_entry'] = rows_entry
         
         # Significant Figures Row
         sig_figs_frame = tk.Frame(left_section)
-        sig_figs_frame.pack(fill=tk.X, pady=2)
+        sig_figs_frame.pack(fill=tk.X, pady=1)
         
         sig_figs_help_btn = tk.Button(sig_figs_frame, text="?", width=2, 
                                       command=lambda: self.show_help("significant_figures.txt"))
-        sig_figs_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        sig_figs_help_btn.pack(side=tk.LEFT, padx=(2, 1))
         
-        sig_figs_label = tk.Label(sig_figs_frame, text="Significant Figures", width=30)
-        sig_figs_label.pack(side=tk.LEFT, padx=(0, 5))
+        sig_figs_label = tk.Label(sig_figs_frame, text="Significant Figures", width=25, anchor="w")
+        sig_figs_label.pack(side=tk.LEFT, padx=(0, 1))
         
         sig_figs_entry = tk.Entry(sig_figs_frame)
         sig_figs_entry._destination = destination
         sig_figs_entry._variable_name = "sig_figs"
         if config.get('sig_figs'):
             sig_figs_entry.insert(0, str(config['sig_figs']))
-        sig_figs_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        sig_figs_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.destination_widgets[destination]['sig_figs_entry'] = sig_figs_entry
         
         # Rounding Tolerance Row
         tolerance_frame = tk.Frame(left_section)
-        tolerance_frame.pack(fill=tk.X, pady=2)
+        tolerance_frame.pack(fill=tk.X, pady=1)
         
         tolerance_help_btn = tk.Button(tolerance_frame, text="?", width=2, 
                                        command=lambda: self.show_help("rounding_tolerance.txt"))
-        tolerance_help_btn.pack(side=tk.LEFT, padx=(5, 2))
+        tolerance_help_btn.pack(side=tk.LEFT, padx=(2, 1))
         
-        tolerance_label = tk.Label(tolerance_frame, text="Rounding Tolerance", width=30)
-        tolerance_label.pack(side=tk.LEFT, padx=(0, 5))
+        tolerance_label = tk.Label(tolerance_frame, text="Rounding Tolerance", width=25, anchor="w")
+        tolerance_label.pack(side=tk.LEFT, padx=(0, 1))
         
         tolerance_entry = tk.Entry(tolerance_frame)
         tolerance_entry._destination = destination
         tolerance_entry._variable_name = "rounding_tolerance"
         if config.get('rounding_tolerance'):
             tolerance_entry.insert(0, str(config['rounding_tolerance']))
-        tolerance_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        tolerance_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         self.destination_widgets[destination]['rounding_tolerance_entry'] = tolerance_entry
         
         # === RIGHT SECTION: Action Buttons ===
@@ -1874,7 +1897,7 @@ class DatasheetGeneratorApp:
         if not hasattr(self, 'color_coding_var'):
             self.color_coding_var = tk.StringVar(value="new_red_old_green")
         color_dropdown = ttk.Combobox(color_frame, textvariable=self.color_coding_var, 
-                                     values=["None (Black)", "new_red_old_green", "new_red", "new_red_and_highlight"], 
+                                     values=["None (Black)", "new_red_old_green", "new_red", "new_red_and_highlight", "new_red_deleted_green"], 
                                      state="readonly", width=20)
         color_dropdown.pack(side=tk.LEFT, padx=5)
         
@@ -1945,18 +1968,22 @@ class DatasheetGeneratorApp:
         )
         clear_highlighting_checkbox.pack(anchor=tk.W)
         
+        # Button frame for Add/Update and Stop buttons (packed to the right)
+        button_frame = tk.Frame(right_section)
+        button_frame.pack(side=tk.RIGHT, padx=10, pady=5, anchor=tk.E)
+        
         # Add/Update button (per destination)
-        generate_button = tk.Button(right_section, text="Add/Update",
+        generate_button = tk.Button(button_frame, text="Add/Update",
                   command=self.add_datasheets, font=("Arial", 10, "bold"), 
                   bg="green", fg="white", padx=20, pady=8, width=12)
-        generate_button.pack(pady=5, padx=10)
+        generate_button.pack(side=tk.LEFT, padx=5)
         self.destination_widgets[destination]['generate_button'] = generate_button
         
         # Stop button (per destination)
-        stop_button = tk.Button(right_section, text="Stop",
+        stop_button = tk.Button(button_frame, text="Stop",
                   command=self.set_halt_flag, bg="red", fg="white", state="disabled",
                   font=("Arial", 10, "bold"), padx=20, pady=8, width=12)
-        stop_button.pack(pady=5, padx=10)
+        stop_button.pack(side=tk.LEFT, padx=5)
         self.destination_widgets[destination]['stop_button'] = stop_button
         
         # Add status label (per destination)
@@ -2025,7 +2052,7 @@ class DatasheetGeneratorApp:
                 
         elif file_extension in ['.xlsx', '.xls', '.xlsm']:
             # Show custom dialog for Excel processing
-            choice = self.show_excel_processing_dialog(data_source, file_path)
+            choice = 'datasheet' #self.show_excel_processing_dialog(data_source, file_path)
             
             if choice == "datasheet":
                 # Process as datasheet
@@ -2172,16 +2199,12 @@ class DatasheetGeneratorApp:
         # Add menu items (Load/Save Settings removed - now in File menu)
         print("DEBUG: Setting up menu commands...")
         menu_commands = [
-            ("Run xlsx search app", self.open_excel_search_app),
             ("Populate Headers on Datasheets", self.open_edit_xlsx),
             ("View Coordinate Value Data", self.display_coordinate_values),
             ("Delete newly added datasheets", self.delete_added_sheets),
             ("Rebuild tabs", self.refresh_tab_content),
             ("Sort Tabs", self.sort_tabs),
             ("Delete Certain Sheets by Prefix", self.delete_sheets_by_prefix),
-            ("Excel Macros", self.open_excel_macros_window),
-            ("Excel Regex Search App", self.open_excel_regex_search_app),
-            ("Semantic Matcher", self.open_semantic_matcher),
             ("Release Excel", self.release_excel_connection),
             ("Release All Excel", self.release_all_excel_connections),
             ("Stop Datasheet Generation", self.set_halt_flag),
@@ -2189,6 +2212,7 @@ class DatasheetGeneratorApp:
             ('update combo box', self.update_combo_boxes),
             ('update coordinates combo', self.update_all_coordinates_combo_boxes),
             ("Migrate to Multi-Destination Format", self.migrate_to_multi_destination),
+            ("Export All Data Sources to Excel", self.export_all_data_sources_to_excel),
         ]
         
         # Add dynamic menu items for each data source
@@ -2203,10 +2227,56 @@ class DatasheetGeneratorApp:
         for label, command in menu_commands:
             self.command_menu.add_command(label=label, command=command)
 
-        # Create main container frame
-        print("DEBUG: Creating main container frame...")
-        main_frame = tk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Create Excel Macros menu
+        print("DEBUG: Creating Excel Macros menu...")
+        self.excel_macros_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Excel Macros", menu=self.excel_macros_menu)
+        self.populate_excel_macros_menu()
+
+        # Create Apps/Utilities menu
+        print("DEBUG: Creating Apps/Utilities menu...")
+        self.apps_utilities_menu = tk.Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Apps/Utilities", menu=self.apps_utilities_menu)
+        self.populate_apps_utilities_menu()
+
+        # Create scrollable container with canvas and scrollbar
+        print("DEBUG: Creating scrollable main container...")
+        canvas_frame = tk.Frame(self.root)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # Create canvas and scrollbar
+        canvas = Canvas(canvas_frame, borderwidth=0)
+        scrollbar = Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        main_frame = tk.Frame(canvas)  # This is the scrollable frame
+
+        # Configure scroll region when content changes
+        def configure_scroll_region(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        main_frame.bind("<Configure>", configure_scroll_region)
+
+        # Update canvas window width when canvas is resized
+        def on_canvas_configure(event):
+            canvas_width = event.width
+            canvas.itemconfig(canvas_window_id, width=canvas_width)
+
+        # Create window in canvas for the scrollable frame
+        canvas_window_id = canvas.create_window((0, 0), window=main_frame, anchor="nw")
+        canvas.bind("<Configure>", on_canvas_configure)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Bind mouse wheel for scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Pack scrollbar and canvas
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # Store reference to scrollable frame
+        self.main_scrollable_frame = main_frame
 
         self.entries = []  # Store entries for later reference
 
@@ -2433,7 +2503,12 @@ class DatasheetGeneratorApp:
             top_tag_frame = ttk.Frame(top_frame)
             top_tag_frame.pack(fill="x", pady=(0, 5))
             
-            ttk.Label(top_tag_frame, text=f"Top Tag for {name}:").pack(side="left")
+            # Add help button for top tag
+            help_btn = ttk.Button(top_tag_frame, text="?", width=3, 
+                                 command=lambda: self.show_help("top_tag.txt"))
+            help_btn.pack(side="left", padx=(0, 5))
+            
+            ttk.Label(top_tag_frame, text=f"Top Tag Cell for {name}:").pack(side="left")
             top_tag_entry = ttk.Entry(top_tag_frame, width=10)
             top_tag_entry.pack(side="left", padx=(5, 0))
             # Ensure current_top_tag is a string
@@ -2455,19 +2530,11 @@ class DatasheetGeneratorApp:
             
             ttk.Button(top_tag_frame, text="Update", command=update_top_tag).pack(side="left", padx=(5, 0))
             
-            # Add help button for top tag
-            help_btn = ttk.Button(top_tag_frame, text="?", width=3, 
-                                 command=lambda: self.show_help("top_tag.txt"))
-            help_btn.pack(side="left", padx=(5, 0))
-            
             # Partial match checkbox (only show for the specific data source)
-            partial_match_frame = ttk.Frame(top_frame)
-            partial_match_frame.pack(fill="x", pady=(0, 5))
-            
             current_partial_match = self.data_sources[data_source].get('partial_match', False)
             partial_match_var = tk.BooleanVar(value=current_partial_match)
-            partial_match_checkbox = tk.Checkbutton(partial_match_frame, 
-                                                   text="Use partial matching (find tag in cell text)", 
+            partial_match_checkbox = tk.Checkbutton(top_tag_frame, 
+                                                   text="Use partial matching", 
                                                    variable=partial_match_var)
             partial_match_checkbox.pack(side="left", padx=5)
             
@@ -2486,7 +2553,7 @@ class DatasheetGeneratorApp:
         coord_frame.configure(width=50)
         coord_frame.pack(pady=(0, 5), anchor="w")
         
-        coord_label = ttk.Label(coord_frame, text="Enter Key Coordinate:")
+        coord_label = ttk.Label(coord_frame, text="Selected Cell:")
         coord_label.pack(side="left")
 
         entry_var = tk.StringVar()
@@ -4307,6 +4374,20 @@ class DatasheetGeneratorApp:
             traceback.print_exc()
             messagebox.showerror("Migration Error", error_msg)
 
+    def convert_datetime_to_string(self, obj):
+        """Recursively convert datetime objects to ISO format strings for JSON serialization"""
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {key: self.convert_datetime_to_string(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self.convert_datetime_to_string(item) for item in obj]
+        elif isinstance(obj, set):
+            # Convert sets to lists for JSON serialization
+            return [self.convert_datetime_to_string(item) for item in obj]
+        else:
+            return obj
+
     def save_settings(self, use_pickle=True):
         """Save current settings to the current file or prompt if none exists"""
         try:
@@ -4404,6 +4485,9 @@ class DatasheetGeneratorApp:
                     'sig_figs': config.get('sig_figs', 4),
                     'rounding_tolerance': config.get('rounding_tolerance', 1e-2)
                 }
+            
+            # Convert datetime objects to strings before JSON serialization
+            settings_data = self.convert_datetime_to_string(settings_data)
             
             # Write to file
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -4536,6 +4620,9 @@ class DatasheetGeneratorApp:
                     'rounding_tolerance': config.get('rounding_tolerance', 1e-2)
                 }
             
+            # Convert datetime objects to strings before JSON serialization
+            settings_data = self.convert_datetime_to_string(settings_data)
+            
             # Write to file
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(settings_data, f, indent=2, ensure_ascii=False)
@@ -4584,6 +4671,16 @@ class DatasheetGeneratorApp:
         """Auto-load the last settings file if it exists"""
         last_file = self.load_last_settings_file_path()
         if last_file and os.path.exists(last_file):
+            # Ask user if they want to load the last project settings
+            response = messagebox.askyesno(
+                "Load Last Project Settings",
+                f"Would you like to load the last project settings?\n\nFile: {last_file}",
+                parent=self.root
+            )
+            if not response:
+                print("DEBUG: User chose not to load last settings file")
+                return
+            
             try:
                 print(f"DEBUG: Auto-loading last settings file: {last_file}")
                 with open(last_file, 'r', encoding='utf-8') as f:
@@ -4942,11 +5039,23 @@ class DatasheetGeneratorApp:
         if default_code not in options:
             options.append(default_code)
         
+        help_text = (
+            "Transformation code can access:\n"
+            "• x or k: the current key (string)\n"
+            "• v: the current value (dictionary)\n\n"
+            "Examples:\n"
+            "• Use a dictionary field as new key: v['line'] or v[\"line\"]\n"
+            "• Transform the key: x.upper() or x.replace('old', 'new')\n"
+            "• Use field with fallback: v.get('line', x)\n"
+            "• Combine key parts: '-'.join(x.split('-')[-2:])"
+        )
+        
         code = ask_combobox(f"Modify Keys - {name}", 
                            f"Enter transformation code for {name}:",
                            options=options,
                            parent=parent,
-                           initialvalue=options[0] if options else default_code)
+                           initialvalue=options[0] if options else default_code,
+                           help_text=help_text)
         
         if code:
             # Update history
@@ -4969,6 +5078,171 @@ class DatasheetGeneratorApp:
 
     # region Data Display
 
+    def _convert_data_to_table_structure(self, data):
+        """
+        Convert data dictionary to table structure (headers and rows).
+        
+        Args:
+            data: Dictionary where keys are row identifiers and values are either:
+                  - Dictionary with field names as keys (creates multi-column table)
+                  - Simple values (creates two-column table: Key, Value)
+        
+        Returns:
+            tuple: (headers, rows) where:
+                - headers: List of header strings (without "Key" column)
+                - rows: List of tuples (key, row_values) where row_values is:
+                  - List of values if value is dict (matching headers order)
+                  - Single value if value is not dict
+        
+        Raises:
+            ValueError: If data is empty or invalid format
+        """
+        if not data:
+            raise ValueError("Data is empty")
+        
+        # Get the first entry to determine structure
+        first_key = next(iter(data))
+        first_value = data[first_key]
+        
+        if isinstance(first_value, dict):
+            # Multi-column structure: use dict keys as headers
+            headers = list(first_value.keys())
+            if not headers:
+                raise ValueError("First entry has no keys to use as headers")
+            
+            # Build rows
+            rows = []
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    # Extract values in the same order as headers
+                    row_values = []
+                    for header in headers:
+                        cell_value = value.get(header, '')
+                        if cell_value is None:
+                            cell_value = ''
+                        row_values.append(cell_value)
+                    rows.append((key, row_values))
+                else:
+                    # If value is not a dict, use the value as a single column
+                    rows.append((key, [value]))
+            
+            return headers, rows
+        else:
+            # Simple key-value structure
+            headers = ["Value"]
+            rows = [(key, [value]) for key, value in data.items()]
+            return headers, rows
+
+    def export_all_data_sources_to_excel(self):
+        """Export all data sources to an Excel file with each data source as a separate sheet"""
+        try:
+            # Get all data sources
+            all_data_sources = self.get_all_data_sources()
+            
+            if not all_data_sources:
+                tk.messagebox.showinfo("No Data Sources", "No data sources available to export.")
+                return
+            
+            # Check if any data source has data
+            has_data = False
+            for data_source in all_data_sources:
+                data = self.data_sources[data_source].get('data', {})
+                if data:
+                    has_data = True
+                    break
+            
+            if not has_data:
+                tk.messagebox.showinfo("No Data", "No data available in any data source to export.")
+                return
+            
+            # Ask user where to save the file
+            file_path = filedialog.asksaveasfilename(
+                title="Export All Data Sources to Excel",
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                initialfile="all_data_sources_export.xlsx"
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Create a new workbook
+            wb = openpyxl.Workbook()
+            
+            # Remove the default sheet if we have data sources
+            if all_data_sources:
+                wb.remove(wb.active)
+            
+            # Process each data source
+            sheets_created = 0
+            for data_source in all_data_sources:
+                data = self.data_sources[data_source].get('data', {})
+                
+                if not data:
+                    # Create empty sheet with a message
+                    ws = wb.create_sheet(title=data_source[:31])  # Excel sheet name limit is 31 chars
+                    ws.cell(row=1, column=1, value="No data available")
+                    continue
+                
+                # Create a sheet for this data source
+                sheet_name = data_source[:31]  # Excel sheet name limit is 31 characters
+                ws = wb.create_sheet(title=sheet_name)
+                
+                # Convert data to table structure
+                try:
+                    headers, rows = self._convert_data_to_table_structure(data)
+                except ValueError as e:
+                    ws.cell(row=1, column=1, value=f"Error: {str(e)}")
+                    continue
+                
+                # Add "Key" as the first column
+                all_headers = ["Key"] + [str(h) for h in headers]
+                
+                # Write headers
+                for col_idx, header in enumerate(all_headers, 1):
+                    cell = ws.cell(row=1, column=col_idx, value=header)
+                    cell.font = Font(bold=True)
+                
+                # Write data rows
+                for row_idx, (key, row_values) in enumerate(rows, start=2):
+                    # Write the key in the first column
+                    ws.cell(row=row_idx, column=1, value=str(key))
+                    
+                    # Write the row values
+                    for col_idx, cell_value in enumerate(row_values, start=2):
+                        if cell_value is None:
+                            cell_value = ''
+                        else:
+                            cell_value = str(cell_value)
+                        ws.cell(row=row_idx, column=col_idx, value=cell_value)
+                
+                # Auto-adjust column widths
+                for col in ws.columns:
+                    max_length = 0
+                    column_letter = col[0].column_letter
+                    for cell in col:
+                        if cell.value:
+                            cell_length = len(str(cell.value))
+                            if cell_length > max_length:
+                                max_length = cell_length
+                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                    ws.column_dimensions[column_letter].width = adjusted_width
+                
+                sheets_created += 1
+            
+            # Save the workbook
+            wb.save(file_path)
+            
+            # Show success message
+            tk.messagebox.showinfo("Export Complete", 
+                                 f"Successfully exported {sheets_created} data source(s) to:\n{file_path}")
+            
+        except Exception as e:
+            tk.messagebox.showerror("Export Error", 
+                                  f"An error occurred while exporting data sources:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
     def view_data(self, data_source=None, initial_search=""):
         """View data for a data source or special case"""
 
@@ -4987,7 +5261,6 @@ class DatasheetGeneratorApp:
         
         # Create a new window
         view_window = tk.Toplevel(self.root)
-        view_window.title(name)
         view_window.transient(self.root)
         # Removed grab_set() to allow opening multiple viewers and interacting with search results
         
@@ -4997,6 +5270,16 @@ class DatasheetGeneratorApp:
         
         # Center the dialog over the main window
         center_window_over_parent(view_window)
+
+        # Helper function to update window title with item count
+        def update_window_title():
+            """Update the window title to include the item count"""
+            current_data = self.data_sources[data_source]['data']
+            count = len(current_data) if current_data else 0
+            view_window.title(f"{name} ({count} items)")
+        
+        # Set initial title
+        update_window_title()
 
         # Create a search frame
         search_frame = tk.Frame(view_window)
@@ -5041,6 +5324,9 @@ class DatasheetGeneratorApp:
                 scrolled_text.insert(tk.END, f"No {name} data available.")
             
             # Keep it editable - removed state='disabled'
+            
+            # Update window title with current count
+            update_window_title()
             
             # Reapply search highlighting if function is available
             if reapply_search[0] is not None:
@@ -5179,6 +5465,153 @@ class DatasheetGeneratorApp:
                 tk.messagebox.showerror("Error", 
                                       f"An error occurred while pasting from clipboard:\n{str(e)}")
 
+        def paste_table_from_clipboard():
+            """Paste tab-separated table data from clipboard and convert to JSON format"""
+            try:
+                # Get clipboard content
+                clipboard_content = self.root.clipboard_get()
+                
+                if not clipboard_content or not clipboard_content.strip():
+                    tk.messagebox.showerror("Clipboard Error", 
+                                          "No content found in clipboard.")
+                    return
+                
+                # Parse tab-separated values
+                lines = clipboard_content.strip().split('\n')
+                if len(lines) < 2:
+                    tk.messagebox.showerror("Invalid Format", 
+                                          "Table must have at least a header row and one data row.")
+                    return
+                
+                # First line is headers
+                headers = [h.strip() for h in lines[0].split('\t')]
+                if len(headers) < 2:
+                    tk.messagebox.showerror("Invalid Format", 
+                                          "Table must have at least 2 columns (key column + data columns).")
+                    return
+                
+                # Ask user which header should be the key
+                key_column_index = None
+                selected_header = None
+                
+                # Create dialog to select key column
+                dialog = Toplevel(self.root)
+                dialog.title("Select Key Column")
+                dialog.geometry("400x150")
+                dialog.transient(self.root)
+                dialog.grab_set()
+                self.center_over_parent(dialog)
+                Label(dialog, text="Which header column should be used as the key?", 
+                      wraplength=350).pack(pady=10)
+                
+                # Create combobox for header selection
+                header_var = tk.StringVar()
+                header_combo = ttk.Combobox(dialog, textvariable=header_var, 
+                                           values=headers, state="readonly", width=40)
+                header_combo.pack(pady=5)
+                header_combo.set(headers[0])  # Default to first header
+                
+                def confirm_selection():
+                    nonlocal key_column_index, selected_header
+                    selected_header = header_var.get()
+                    if selected_header in headers:
+                        key_column_index = headers.index(selected_header)
+                        dialog.destroy()
+                    else:
+                        tk.messagebox.showerror("Invalid Selection", 
+                                              "Please select a valid header.")
+                
+                def cancel_dialog():
+                    nonlocal key_column_index
+                    key_column_index = None
+                    dialog.destroy()
+                
+                # Buttons
+                button_frame = Frame(dialog)
+                button_frame.pack(pady=10)
+                Button(button_frame, text="OK", command=confirm_selection, width=10).pack(side=LEFT, padx=5)
+                Button(button_frame, text="Cancel", command=cancel_dialog, width=10).pack(side=LEFT, padx=5)
+                
+                # Wait for dialog to close
+                dialog.wait_window()
+                
+                # Check if user cancelled
+                if key_column_index is None:
+                    return  # User cancelled
+                
+                # Parse data rows
+                pasted_data = {}
+                
+                for line_num, line in enumerate(lines[1:], start=2):
+                    if not line.strip():
+                        continue  # Skip empty lines
+                    
+                    cells = [c.strip() for c in line.split('\t')]
+                    
+                    # Ensure we have at least the key column
+                    if len(cells) <= key_column_index:
+                        continue
+                    
+                    # Get the key from the selected key column
+                    key = cells[key_column_index] if cells[key_column_index] else f"Row_{line_num}"
+                    
+                    # Build dictionary for this row
+                    row_dict = {}
+                    for i, header in enumerate(headers):
+                        if i == key_column_index:
+                            continue  # Skip the key column
+                        # Get value from corresponding cell
+                        if i < len(cells):
+                            row_dict[header] = cells[i]
+                        else:
+                            row_dict[header] = ""  # Empty cell
+                    
+                    # If key already exists, append a suffix
+                    original_key = key
+                    counter = 1
+                    while key in pasted_data:
+                        key = f"{original_key}_{counter}"
+                        counter += 1
+                    
+                    pasted_data[key] = row_dict
+                
+                if not pasted_data:
+                    tk.messagebox.showerror("Invalid Format", 
+                                          "No valid data rows found in clipboard.")
+                    return
+                
+                # Confirm overwrite
+                result = tk.messagebox.askyesno("Confirm Overwrite", 
+                                              f"This will overwrite all current {name} data with the table data.\n\n"
+                                              f"Found {len(pasted_data)} entries from table.\n"
+                                              f"Headers: {', '.join(headers)}\n\n"
+                                              "Do you want to continue?")
+                
+                if result:
+                    # Update the data
+                    self.data_sources[data_source]['data'] = pasted_data
+                    
+                    # Update coordinates combo box with new data
+                    self.update_coordinates_combo_box(data_source)
+                    
+                    # Update tab text to show checkmark
+                    self.add_checkmark_to_tab(data_source)
+                    
+                    # Show success message
+                    tk.messagebox.showinfo("Paste Complete", 
+                                         f"Successfully pasted {len(pasted_data)} entries from table.\n"
+                                         f"Headers: {', '.join(headers)}")
+                    
+                    # Refresh the display
+                    refresh_display()
+                    
+            except tk.TclError:
+                tk.messagebox.showerror("Clipboard Error", 
+                                      "No content found in clipboard.")
+            except Exception as e:
+                tk.messagebox.showerror("Error", 
+                                      f"An error occurred while pasting table from clipboard:\n{str(e)}")
+
         def copy_to_clipboard():
             """Copy current data as JSON to clipboard"""
             try:
@@ -5210,30 +5643,19 @@ class DatasheetGeneratorApp:
                     tk.messagebox.showwarning("No Data", f"No {name} data available to copy.")
                     return
                 
-                # Get the first entry to determine headers
-                first_key = next(iter(current_data))
-                first_value = current_data[first_key]
-                
-                # Check if first value is a dictionary
-                if not isinstance(first_value, dict):
-                    tk.messagebox.showwarning("Invalid Format", 
-                                            "The first entry's value must be a dictionary to create a table.")
-                    return
-                
-                # Get headers from the first entry's keys
-                headers = list(first_value.keys())
-                if not headers:
-                    tk.messagebox.showwarning("No Headers", 
-                                            "The first entry has no keys to use as headers.")
+                # Convert data to table structure using the reusable method
+                try:
+                    headers, rows = self._convert_data_to_table_structure(current_data)
+                except ValueError as e:
+                    tk.messagebox.showwarning("Invalid Format", str(e))
                     return
                 
                 # Sanitize headers (remove tabs, newlines, carriage returns)
-                sanitized_headers = []
-                for h in headers:
-                    header_str = str(h)
-                    # Replace tabs and newlines to avoid breaking table structure
-                    header_str = header_str.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
-                    sanitized_headers.append(header_str)
+                def sanitize_text(text):
+                    """Remove tabs, newlines, and carriage returns"""
+                    return str(text).replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+                
+                sanitized_headers = [sanitize_text(h) for h in headers]
                 
                 # Build the table
                 table_lines = []
@@ -5242,25 +5664,10 @@ class DatasheetGeneratorApp:
                 table_lines.append('\t'.join(sanitized_headers))
                 
                 # Add data rows
-                for key, value in current_data.items():
-                    if isinstance(value, dict):
-                        # Extract values in the same order as headers
-                        row_values = []
-                        for header in headers:
-                            cell_value = value.get(header, '')
-                            # Convert to string and handle None
-                            if cell_value is None:
-                                cell_value = ''
-                            else:
-                                cell_value = str(cell_value)
-                            # Replace tabs and newlines to avoid breaking table structure
-                            cell_value = cell_value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
-                            row_values.append(cell_value)
-                        table_lines.append('\t'.join(row_values))
-                    else:
-                        # If value is not a dict, create a single-column row
-                        cell_value = str(value).replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
-                        table_lines.append(cell_value)
+                for key, row_values in rows:
+                    # Sanitize all cell values
+                    sanitized_values = [sanitize_text(val) for val in row_values]
+                    table_lines.append('\t'.join(sanitized_values))
                 
                 # Join all lines with newlines
                 table_string = '\n'.join(table_lines)
@@ -5895,6 +6302,10 @@ class DatasheetGeneratorApp:
         paste_button = tk.Button(button_frame, text="Paste from Clipboard", command=paste_from_clipboard)
         paste_button.pack(side=tk.LEFT, padx=5)
         
+        # Add Paste Table from Clipboard button
+        paste_table_button = tk.Button(button_frame, text="Paste Table from Clipboard", command=paste_table_from_clipboard)
+        paste_table_button.pack(side=tk.LEFT, padx=5)
+        
         # Add Copy to Clipboard button
         copy_button = tk.Button(button_frame, text="Copy JSON to Clipboard", command=copy_to_clipboard)
         copy_button.pack(side=tk.LEFT, padx=5)
@@ -6053,6 +6464,7 @@ class DatasheetGeneratorApp:
         # Search state variables
         search_matches = []
         current_match_index = [0]  # Using list to make it mutable in nested functions
+        search_debounce_timer = [None]  # Timer ID for debouncing search
         
         def clear_highlights():
             """Clear all search highlights"""
@@ -6069,6 +6481,11 @@ class DatasheetGeneratorApp:
             clear_highlights()
             
             if not search_text:
+                match_label.config(text="")
+                return
+            
+            # Only search if at least 2 characters
+            if len(search_text) < 2:
                 match_label.config(text="")
                 return
             
@@ -6105,9 +6522,22 @@ class DatasheetGeneratorApp:
                 match_label.config(text="No matches found")
         
         def on_search_change(*args):
-            """Called when search text changes"""
+            """Called when search text changes - debounced and requires minimum 2 characters"""
             search_text = search_var.get()
-            highlight_matches(search_text)
+            
+            # Cancel any pending search
+            if search_debounce_timer[0] is not None:
+                view_window.after_cancel(search_debounce_timer[0])
+                search_debounce_timer[0] = None
+            
+            # If less than 2 characters, clear highlights immediately
+            if len(search_text) < 2:
+                clear_highlights()
+                match_label.config(text="")
+                return
+            
+            # Schedule search after 500ms delay
+            search_debounce_timer[0] = view_window.after(500, lambda: highlight_matches(search_text))
         
         def goto_next_match():
             """Navigate to the next match"""
@@ -6177,12 +6607,12 @@ class DatasheetGeneratorApp:
         # Set the reapply search function for refresh_display
         def reapply_search_func():
             search_text = search_var.get()
-            if search_text:
+            if search_text and len(search_text) >= 2:
                 highlight_matches(search_text)
         reapply_search[0] = reapply_search_func
         
-        # Trigger initial search highlighting if search term was provided
-        if initial_search:
+        # Trigger initial search highlighting if search term was provided (only if >= 2 characters)
+        if initial_search and len(initial_search) >= 2:
             highlight_matches(initial_search)
 
 
@@ -6740,6 +7170,10 @@ The datasheets have been generated and are ready for use."""
             if 'datasheet_entry' in widgets:
                 current_path = widgets['datasheet_entry'].get()
                 if current_path:
+                    # Check if file exists
+                    if not os.path.exists(current_path):
+                        messagebox.showwarning("File Not Found", f"The file does not exist:\n{current_path}\n\nPlease check the path and try again.")
+                        return
                     self.destinations[destination]['path'] = current_path
                     self.destination_datasheet = current_path  # Also set global for compatibility
                     print(f"DEBUG: Using destination '{destination}' datasheet path from entry: {current_path}")
@@ -6754,6 +7188,10 @@ The datasheets have been generated and are ready for use."""
             if hasattr(self, 'datasheet_entry'):
                 current_path = self.datasheet_entry.get()
                 if current_path:
+                    # Check if file exists
+                    if not os.path.exists(current_path):
+                        messagebox.showwarning("File Not Found", f"The file does not exist:\n{current_path}\n\nPlease check the path and try again.")
+                        return
                     self.destination_datasheet = current_path
                     print(f"DEBUG: Using destination datasheet path from entry: {current_path}")
                 else:
@@ -7360,6 +7798,166 @@ The datasheets have been generated and are ready for use."""
         macro_window = tk.Toplevel(self.root)
         ExcelMacroViewer(macro_window)
 
+    def populate_excel_macros_menu(self):
+        """Populate the Excel Macros menu with files from the excel_macros folder."""
+        # Clear existing menu items
+        self.excel_macros_menu.delete(0, tk.END)
+        
+        # Get the excel_macros folder path
+        macros_dir = os.path.join(os.getcwd(), "excel_macros")
+        
+        if not os.path.isdir(macros_dir):
+            self.excel_macros_menu.add_command(label="No macros folder found", state=tk.DISABLED)
+            return
+        
+        # Get all files in the directory
+        try:
+            files = [f for f in os.listdir(macros_dir) if os.path.isfile(os.path.join(macros_dir, f))]
+            files.sort()  # Sort alphabetically
+            
+            if not files:
+                self.excel_macros_menu.add_command(label="No files found", state=tk.DISABLED)
+                return
+            
+            # Add each file as a menu item
+            for filename in files:
+                self.excel_macros_menu.add_command(
+                    label=filename,
+                    command=lambda f=filename: self.copy_macro_to_clipboard(f)
+                )
+        except Exception as e:
+            self.excel_macros_menu.add_command(label=f"Error: {str(e)}", state=tk.DISABLED)
+
+    def copy_macro_to_clipboard(self, filename):
+        """Copy the contents of a macro file to the clipboard and notify the user."""
+        macros_dir = os.path.join(os.getcwd(), "excel_macros")
+        file_path = os.path.join(macros_dir, filename)
+        
+        try:
+            # Read file contents
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Copy to clipboard
+            pyperclip.copy(content)
+            
+            # Notify user
+            messagebox.showinfo(
+                "Copied to Clipboard",
+                f"Contents of '{filename}' have been copied to the clipboard."
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to copy '{filename}' to clipboard:\n{str(e)}"
+            )
+
+    def populate_apps_utilities_menu(self):
+        """Populate the Apps/Utilities menu with Python files from utilities folder and MODEL MAKERS submenu."""
+        # Clear existing menu items
+        self.apps_utilities_menu.delete(0, tk.END)
+        
+        # Get the utilities folder path
+        utilities_dir = os.path.join(os.getcwd(), "utilities")
+        
+        if not os.path.isdir(utilities_dir):
+            self.apps_utilities_menu.add_command(label="Utilities folder not found", state=tk.DISABLED)
+            return
+        
+        # Add Python files from utilities folder (excluding __pycache__)
+        try:
+            files = []
+            for item in os.listdir(utilities_dir):
+                item_path = os.path.join(utilities_dir, item)
+                # Only include .py files, exclude __pycache__ and directories
+                if os.path.isfile(item_path) and item.lower().endswith('.py'):
+                    files.append(item)
+            
+            files.sort()  # Sort alphabetically
+            
+            if files:
+                for filename in files:
+                    file_path = os.path.join(utilities_dir, filename)
+                    self.apps_utilities_menu.add_command(
+                        label=filename,
+                        command=lambda f=file_path: self.run_python_script(f)
+                    )
+                self.apps_utilities_menu.add_separator()
+            
+            # Add MODEL MAKERS submenu
+            model_makers_dir = os.path.join(utilities_dir, "MODEL MAKERS")
+            if os.path.isdir(model_makers_dir):
+                self.model_makers_menu = tk.Menu(self.apps_utilities_menu, tearoff=0)
+                self.apps_utilities_menu.add_cascade(label="MODEL MAKERS", menu=self.model_makers_menu)
+                self.populate_model_makers_menu(model_makers_dir, self.model_makers_menu)
+            else:
+                self.apps_utilities_menu.add_command(label="MODEL MAKERS folder not found", state=tk.DISABLED)
+                
+        except Exception as e:
+            self.apps_utilities_menu.add_command(label=f"Error: {str(e)}", state=tk.DISABLED)
+
+    def populate_model_makers_menu(self, directory, parent_menu):
+        """Recursively populate MODEL MAKERS menu with Python files organized by folder structure."""
+        try:
+            items = sorted(os.listdir(directory))
+            subdirs = []
+            py_files = []
+            
+            # Separate directories and Python files
+            for item in items:
+                item_path = os.path.join(directory, item)
+                if os.path.isdir(item_path):
+                    subdirs.append(item)
+                elif os.path.isfile(item_path) and item.lower().endswith('.py'):
+                    py_files.append(item)
+            
+            # Add Python files first
+            for py_file in py_files:
+                file_path = os.path.join(directory, py_file)
+                parent_menu.add_command(
+                    label=py_file,
+                    command=lambda f=file_path: self.run_python_script(f)
+                )
+            
+            # Add subdirectories as cascade menus
+            if py_files and subdirs:
+                parent_menu.add_separator()
+            
+            for subdir in subdirs:
+                subdir_path = os.path.join(directory, subdir)
+                submenu = tk.Menu(parent_menu, tearoff=0)
+                parent_menu.add_cascade(label=subdir, menu=submenu)
+                self.populate_model_makers_menu(subdir_path, submenu)
+                
+        except Exception as e:
+            parent_menu.add_command(label=f"Error: {str(e)}", state=tk.DISABLED)
+
+    def run_python_script(self, script_path):
+        """Run a Python script in a separate process."""
+        try:
+            if not os.path.isfile(script_path):
+                messagebox.showerror("Error", f"Script file not found:\n{script_path}")
+                return
+            
+            # Get the Python executable path
+            python_exe = sys.executable
+            
+            # Run the script in a separate process
+            # Use CREATE_NEW_CONSOLE on Windows to show output, or DETACHED_PROCESS to run silently
+            if os.name == 'nt':  # Windows
+                subprocess.Popen(
+                    [python_exe, script_path],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE
+                )
+            else:  # Unix-like systems
+                subprocess.Popen([python_exe, script_path])
+            
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to run script:\n{script_path}\n\nError: {str(e)}"
+            )
+
     def open_excel_regex_search_app(self):
         """Opens the Excel Regex Search window."""
         regex_window = tk.Toplevel(self.root)
@@ -7368,7 +7966,7 @@ The datasheets have been generated and are ready for use."""
     
     def open_semantic_matcher(self):
         """Opens the Semantic Matcher window."""
-        from semantic_matcher import SemanticMatcherApp
+        from utilities.semantic_matcher import SemanticMatcherApp
         semantic_window = tk.Toplevel(self.root)
         SemanticMatcherApp(semantic_window, self)
 

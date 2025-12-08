@@ -50,24 +50,95 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
     else:
         worksheets_to_process = [ws for ws in wb.worksheets if ws.title in selected_sheets]
 
-    for ws in worksheets_to_process:
-        tag_coord = init_tag_coord
-        coords_to_fields = init_coords_to_fields
+    # Convert initial coordinates to row/col indices for faster access
+    init_tag_row, init_tag_col = coord_to_row_col(init_tag_coord)
+    init_coords_to_fields_indices = {}
+    for coord, field_name in init_coords_to_fields.items():
+        row, col = coord_to_row_col(coord)
+        init_coords_to_fields_indices[(row, col)] = field_name
+
+    for ws_idx, ws in enumerate(worksheets_to_process):
+        print(f"Processing sheet {ws_idx + 1}/{len(worksheets_to_process)}: {ws.title}")
+        
+        # Pre-cache only the specific cells that will be accessed for this sheet
+        # Build a set of (row, col) tuples that need to be cached
+        cells_to_cache = set()
+        temp_tag_row, temp_tag_col = init_tag_row, init_tag_col
+        temp_coords_to_fields_indices = init_coords_to_fields_indices.copy()
+        for i in range(tags_per_sheet):
+            cells_to_cache.add((temp_tag_row, temp_tag_col))
+            for (row, col) in temp_coords_to_fields_indices.keys():
+                cells_to_cache.add((row, col))
+            temp_tag_row += 1
+            temp_coords_to_fields_indices = increment_coords_to_fields_indices(temp_coords_to_fields_indices)
+        
+        # Cache cells by reading only the specific rows that contain needed cells
+        cell_cache = {}  # Dictionary: (row, col) -> value
+        
+        if cells_to_cache:
+            # Group cells by row for efficient batch reading
+            rows_to_read = {}
+            for row, col in cells_to_cache:
+                if row not in rows_to_read:
+                    rows_to_read[row] = set()
+                rows_to_read[row].add(col)
+            
+            # Determine the column range for each row
+            min_row_needed = min(rows_to_read.keys())
+            max_row_needed = max(rows_to_read.keys())
+            max_col_needed = max(max(cols) for cols in rows_to_read.values())
+            
+            print(f"  Caching {len(cells_to_cache)} specific cells from rows {min_row_needed}-{max_row_needed}...")
+            # Use iter_rows to read rows efficiently, but only cache the specific cells we need
+            try:
+                for row in ws.iter_rows(min_row=min_row_needed, max_row=max_row_needed, min_col=1, max_col=max_col_needed, values_only=False):
+                    row_idx = row[0].row
+                    if row_idx in rows_to_read:
+                        needed_cols = rows_to_read[row_idx]
+                        for cell in row:
+                            if cell.column in needed_cols:
+                                cell_cache[(row_idx, cell.column)] = cell.value
+            except Exception as e:
+                print(f"  Warning: Could not cache cells using iter_rows: {e}")
+                # Fallback: cache only the specific cells we need (much faster than caching entire range)
+                for row_idx, cols in rows_to_read.items():
+                    for col_idx in cols:
+                        try:
+                            cell_cache[(row_idx, col_idx)] = ws.cell(row_idx, col_idx).value
+                        except:
+                            pass
+        print(f"  Cell cache built ({len(cell_cache)} cells cached)")
+        
+        tag_row, tag_col = init_tag_row, init_tag_col
+        coords_to_fields_indices = init_coords_to_fields_indices.copy()
         # Iterate over each coordinate-field name pair
         for i in range(tags_per_sheet):
-            tag = ws[tag_coord].value
+            tag_coord_str = row_col_to_coord(tag_row, tag_col)
+            print(f"Processing tag: {tag_coord_str} (tag {i+1}/{tags_per_sheet} in sheet '{ws.title}')")
+            
+            # Use cached cell data for faster access
+            if (tag_row, tag_col) in cell_cache:
+                tag = cell_cache[(tag_row, tag_col)]
+            else:
+                # Fallback to direct access if not cached
+                tag = ws.cell(tag_row, tag_col).value
             
             # Skip if tag is None or empty (empty cell)
             if tag is None:
                 # increment the coords and tag for next iteration
-                coords_to_fields = increment_coords_to_fields(coords_to_fields)
-                tag_coord = increment_coord(tag_coord)
+                coords_to_fields_indices = increment_coords_to_fields_indices(coords_to_fields_indices)
+                tag_row += 1
                 continue
             
+            # Extract data using cached cell data
             tag_data = {}
-            for coord, field_name in coords_to_fields.items():
-                # Extract the value from the specified cell
-                cell_value = ws[coord].value
+            for (row, col), field_name in coords_to_fields_indices.items():
+                # Extract the value from cached cell data (much faster than individual cell access)
+                if (row, col) in cell_cache:
+                    cell_value = cell_cache[(row, col)]
+                else:
+                    # Fallback to direct access if not cached
+                    cell_value = ws.cell(row, col).value
                 # Add the field name and its corresponding value to the extracted_data dictionary
                 tag_data[field_name] = cell_value
 
@@ -81,19 +152,23 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
                 duplicate_tags_info.append({
                     'tag': tag,
                     'sheet': ws.title,
-                    'coordinate': tag_coord,
+                    'coordinate': tag_coord_str,
                     'occurrence': duplicate_counts[tag]
                 })
-                print(f"Duplicate tag found: '{tag}' in sheet '{ws.title}' at {tag_coord} (renamed to '{unique_tag}')")
+                print(f"Duplicate tag found: '{tag}' in sheet '{ws.title}' at {tag_coord_str} (renamed to '{unique_tag}')")
             else:
                 unique_tag = tag
             
             # add tag to all tag data
             all_tag_data[unique_tag] = tag_data
-            # increment the coords and tag
-            coords_to_fields = increment_coords_to_fields(coords_to_fields)
-            tag_coord = increment_coord(tag_coord)
+            
+            # Increment coordinates for next iteration
+            coords_to_fields_indices = increment_coords_to_fields_indices(coords_to_fields_indices)
+            tag_row += 1
 
+    # Close workbook to free resources
+    wb.close()
+    
     # Log summary of duplicates if any were found
     if duplicate_tags_info:
         unique_duplicate_tags = set(info['tag'] for info in duplicate_tags_info)
@@ -104,6 +179,15 @@ def extract_data_from_datasheets(file_path, init_tag_coord, init_coords_to_field
             print(f"  - Tag '{tag}': {len(occurrences) + 1} total occurrences (1 original + {len(occurrences)} duplicates)")
             for occ in occurrences:
                 print(f"    - Duplicate in sheet '{occ['sheet']}' at {occ['coordinate']} (renamed to '{tag}_{occ['occurrence']}')")
+
+    # Log extraction summary
+    total_tags = len(all_tag_data)
+    total_sheets = len(worksheets_to_process)
+    print(f"\n=== Extraction Summary ===")
+    print(f"Total tags extracted: {total_tags}")
+    print(f"Total sheets processed: {total_sheets}")
+    print(f"Tags per sheet: {tags_per_sheet}")
+    print(f"Total fields per tag: {len(init_coords_to_fields)}")
 
     # Return the dictionary of extracted data and duplicate information
     return all_tag_data, duplicate_tags_info
@@ -116,6 +200,17 @@ def increment_coords_to_fields(coords_to_fields):
         new_coords_to_fields[new_coord] = field_name
 
     return new_coords_to_fields
+
+
+def increment_coords_to_fields_indices(coords_to_fields_indices):
+    """
+    Increment row numbers for all coordinates in the dictionary.
+    Returns a new dictionary with incremented row numbers.
+    """
+    new_coords_to_fields_indices = {}
+    for (row, col), field_name in coords_to_fields_indices.items():
+        new_coords_to_fields_indices[(row + 1, col)] = field_name
+    return new_coords_to_fields_indices
 
 
 def increment_coord(coord):
@@ -134,6 +229,41 @@ def split_text_on_first_number(text):
     else:
         # If there is no digit in the text, return the entire text
         return text, ''
+
+
+def coord_to_row_col(coord):
+    """
+    Convert Excel coordinate string (e.g., 'A1', 'B104') to (row, column) tuple.
+    Returns (row, col) where row is 1-indexed and col is 1-indexed.
+    """
+    match = re.match(r'([A-Z]+)(\d+)', coord)
+    if not match:
+        raise ValueError(f"Invalid coordinate format: {coord}")
+    
+    col_str = match.group(1)
+    row = int(match.group(2))
+    
+    # Convert column letters to number (A=1, B=2, ..., Z=26, AA=27, etc.)
+    col = 0
+    for char in col_str:
+        col = col * 26 + (ord(char) - ord('A') + 1)
+    
+    return row, col
+
+
+def row_col_to_coord(row, col):
+    """
+    Convert (row, column) tuple to Excel coordinate string.
+    row and col are 1-indexed.
+    """
+    # Convert column number to letters
+    col_str = ""
+    while col > 0:
+        col -= 1
+        col_str = chr(ord('A') + (col % 26)) + col_str
+        col //= 26
+    
+    return f"{col_str}{row}"
 
 
 class DatasheetExtractor:
@@ -294,10 +424,14 @@ class DatasheetExtractor:
     def start_extraction(self):
         file_path = self.file_path_entry.get()
         init_tag_coord = self.init_tag_coord_entry.get()
+        print("getting init coords to fields")
         init_coords_to_fields = dict(eval(self.init_coords_to_fields_entry.get()))
+        print("getting tags per sheet")
         tags_per_sheet = int(self.tags_per_sheet_entry.get() if self.tags_per_sheet_entry.get().isdigit() else 1)
+        print(f"Tags per sheet: {tags_per_sheet}")
+        print("getting selected sheets")
         selected_sheets = self.get_selected_sheets()
-
+        print(f"Selected sheets: {selected_sheets}")
         # If no sheets are selected, use all sheets
         if not selected_sheets:
             selected_sheets = self.all_sheets

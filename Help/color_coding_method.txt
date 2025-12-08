@@ -8,6 +8,7 @@ Options:
 2. "new_red_old_green" - Newer data in red, older data in green
 3. "new_red" - Only newer data highlighted in red, rest in black
 4. "new_red_and_highlight" - Newer data in red with yellow background highlighting for modified cells
+5. "new_red_deleted_green" - Character-level diff: unchanged black, new red, deleted green with strikethrough
 
 Usage:
 - Select from the dropdown menu
@@ -19,6 +20,7 @@ When to Use Each Option:
 - new_red_old_green: When comparing two versions and want both highlighted
 - new_red: When you want to emphasize only the newest changes
 - new_red_and_highlight: When you want to emphasize newest changes AND highlight modified cells with yellow background
+- new_red_deleted_green: When you want to see character-level changes with deleted text shown in green with strikethrough
 
 Tips:
 - Color coding affects both text color and cell background (for new_red_and_highlight option)

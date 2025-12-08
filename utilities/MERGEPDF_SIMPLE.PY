@@ -54,7 +54,7 @@ def merge_pdfs(input_files, output_file):
         return False
 
 # Example usage
-if __name__ == "__main__":
+'''if __name__ == "__main__":
     # List of PDF files to merge (change these to your actual files)
     pdf_files = [
         r"S:\Projects\24317_Electra_CO_EPCM\Engineering\Instrumentation\DataSheets\VALVES\PDFS\SWISS PLUG COVER.pdf",
@@ -66,3 +66,4 @@ if __name__ == "__main__":
     
     # Merge the PDFs
     merge_pdfs(pdf_files, output_file)
+'''

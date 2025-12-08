@@ -13,11 +13,29 @@ def transform_dictionary(input_dict, transformation_code):
     """
     Transform all keys in a dictionary using the provided transformation code.
     Returns a new dictionary with transformed keys and original values.
+    
+    The transformation code can access:
+    - x: the current key (string)
+    - v: the current value (dictionary)
+    - k: alias for x (backward compatibility)
+    
+    Examples:
+    - Use key: 'x' or 'k'
+    - Use value from dict: 'v["line"]' or "v['line']"
+    - Use value with fallback: 'v.get("line", x)'
     """
-    return {
-        translate(key, transformation_code): value
-        for key, value in input_dict.items()
-    }
+    result = {}
+    for key, value in input_dict.items():
+        try:
+            # Allow access to both key (x, k) and value (v)
+            x_fn = eval(f'lambda x, v, k=x: {transformation_code}')
+            new_key = x_fn(key, value, key)
+            result[new_key] = value
+            print(f'doing transformation {transformation_code} on key "{key}" -> "{new_key}"')
+        except Exception as e:
+            print(f'error applying transformation to key "{key}": {e}')
+            result[key] = value
+    return result
 
 def try_round_to_sigfigs(num, sig_figs=4, tolerance=1e-2):
     # Rounds a number to specified significant figures, with additional rounding for very close values.
@@ -497,6 +515,111 @@ def apply_character_coloring(sheet, cell_address, old_text, new_text):
         except:
             pass
 
+def apply_diff_coloring(sheet, cell_address, old_text, new_text):
+    """Apply character-level diff coloring: unchanged black, new red, deleted green with strikethrough"""
+    try:
+        import difflib
+        
+        # Get the cell
+        cell = sheet.range(cell_address)
+        
+        # Check if cell is part of a merged range
+        if cell.api.MergeCells:
+            # Get the merged range address
+            merged_range_address = cell.api.MergeArea.Address
+            # Use the top-left cell of the merged range
+            cell = sheet.range(merged_range_address.split(':')[0])
+        
+        # Use difflib to find differences
+        matcher = difflib.SequenceMatcher(None, old_text, new_text)
+        
+        # Build combined text showing deletions with strikethrough
+        combined_text = ""
+        char_ranges = []  # List of (start, end, color, strikethrough) tuples
+        
+        current_pos = 0
+        
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                # Unchanged text - add to combined and mark as black
+                text_segment = old_text[i1:i2]
+                start_pos = current_pos
+                end_pos = current_pos + len(text_segment)
+                combined_text += text_segment
+                char_ranges.append((start_pos, end_pos, (0, 0, 0), False))  # Black, no strikethrough
+                current_pos = end_pos
+                
+            elif tag == 'replace':
+                # Replaced text - show deleted part with strikethrough in green, then new part in red
+                deleted_text = old_text[i1:i2]
+                new_text_segment = new_text[j1:j2]
+                
+                # Add deleted text with strikethrough (green)
+                if deleted_text:
+                    start_pos = current_pos
+                    end_pos = current_pos + len(deleted_text)
+                    combined_text += deleted_text
+                    char_ranges.append((start_pos, end_pos, (0, 170, 0), True))  # Green with strikethrough
+                    current_pos = end_pos
+                
+                # Add new text (red)
+                if new_text_segment:
+                    start_pos = current_pos
+                    end_pos = current_pos + len(new_text_segment)
+                    combined_text += new_text_segment
+                    char_ranges.append((start_pos, end_pos, (255, 0, 0), False))  # Red, no strikethrough
+                    current_pos = end_pos
+                    
+            elif tag == 'delete':
+                # Deleted text - add with strikethrough in green
+                deleted_text = old_text[i1:i2]
+                if deleted_text:
+                    start_pos = current_pos
+                    end_pos = current_pos + len(deleted_text)
+                    combined_text += deleted_text
+                    char_ranges.append((start_pos, end_pos, (0, 170, 0), True))  # Green with strikethrough
+                    current_pos = end_pos
+                    
+            elif tag == 'insert':
+                # Inserted text - add in red
+                new_text_segment = new_text[j1:j2]
+                if new_text_segment:
+                    start_pos = current_pos
+                    end_pos = current_pos + len(new_text_segment)
+                    combined_text += new_text_segment
+                    char_ranges.append((start_pos, end_pos, (255, 0, 0), False))  # Red, no strikethrough
+                    current_pos = end_pos
+        
+        # Set the combined text as cell value
+        cell.value = combined_text
+        
+        # Clear any existing formatting
+        try:
+            cell.api.Font.Color = (0, 0, 0)  # Reset to black
+            cell.api.Font.Strikethrough = False
+        except:
+            pass
+        
+        # Apply character-level formatting
+        for start_pos, end_pos, color, strikethrough in char_ranges:
+            try:
+                if end_pos > start_pos:
+                    char_range = cell.characters[start_pos:end_pos]
+                    char_range.font.color = color
+                    if strikethrough:
+                        char_range.font.strikethrough = True
+            except Exception as e:
+                print(f"Error coloring text range [{start_pos}:{end_pos}]: {e}")
+        
+    except Exception as e:
+        print(f"Error applying diff coloring: {e}")
+        # Fallback: just set the new text
+        try:
+            cell.value = new_text
+            cell.api.Font.Color = (255, 0, 0)  # Red
+        except:
+            pass
+
 def apply_append_coloring(sheet, cell_address, current_value, new_value):
     """Apply append-style color coding (green for old, red for new)"""
     try:
@@ -562,7 +685,7 @@ def update_cell_xlwings(sheet, cell_address, value, cell_update_option=None):
         sheet: The worksheet to update
         cell_address: The cell address to update
         value: The new value to set
-        cell_update_option: Color coding option - None (black), "new_red_old_green" (current method), or "new_red" (character-level)
+        cell_update_option: Color coding option - None (black), "new_red_old_green" (current method), "new_red" (character-level), "new_red_and_highlight", or "new_red_deleted_green" (character-level diff with deleted green)
     """
     
     try:
@@ -606,6 +729,10 @@ def update_cell_xlwings(sheet, cell_address, value, cell_update_option=None):
             apply_character_coloring(sheet, cell_address, current_value_str, value_str)
             # Apply yellow background highlighting since data was modified
             apply_yellow_highlighting(sheet, cell_address)
+            
+        elif cell_update_option == "new_red_deleted_green":
+            # Character-level diff coloring: unchanged black, new red, deleted green with strikethrough
+            apply_diff_coloring(sheet, cell_address, current_value_str, value_str)
             
         else:
             # No color coding - just update the value in black
@@ -1245,7 +1372,7 @@ def center_window_over_parent(window):
         # Set window position
         window.geometry(f"+{x}+{y}")
 
-def ask_combobox(title, prompt, options=None, parent=None, initialvalue=""):
+def ask_combobox(title, prompt, options=None, parent=None, initialvalue="", help_text=None):
     """
     Simple dialog with a combobox for selecting or typing a value.
     
@@ -1255,6 +1382,7 @@ def ask_combobox(title, prompt, options=None, parent=None, initialvalue=""):
         options: List of options to show in dropdown (can be empty)
         parent: Parent window to center over
         initialvalue: Initial value to show in combobox
+        help_text: Optional help text to display below the prompt
         
     Returns:
         String value entered/selected, or None if cancelled
@@ -1271,6 +1399,11 @@ def ask_combobox(title, prompt, options=None, parent=None, initialvalue=""):
     
     # Label
     Label(dialog, text=prompt).pack(padx=20, pady=(20, 10))
+    
+    # Help text (if provided)
+    if help_text:
+        help_label = Label(dialog, text=help_text, justify=LEFT, wraplength=500, fg="gray")
+        help_label.pack(padx=20, pady=(0, 10))
     
     # Combobox
     combo_var = tk.StringVar(value=initialvalue)

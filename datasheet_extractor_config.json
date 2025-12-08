@@ -1,15 +1,9 @@
 {
-    "file_path": "//stor-dn-01.se.local/projects/Projects/24317_Electra_CO_EPCM/Engineering/Instrumentation/DataSheets/TT Temperature Transmitters_WORKING DC.xlsx",
-    "init_tag_coord": "C41",
-    "init_coords_to_fields": "{'C41': 'TRANSMITTER TAG NO.', 'E41': 'P&ID', 'H41': 'CALIBRATED RANGE (C)', 'I41': 'OPER. TEMP.\\n(\u00b0C)', 'L41': 'DESIGN TEMP.\\n(\u00b0C)', 'O41': 'LINE / VESSEL NO.', 'R41': 'SERVICE', 'U41': 'PROCESS FLUID', 'W41': 'TRANSMITTER\\nMODEL NO.', 'C48': 'SENSOR/WELL\\nTAG NO.', 'E48': 'PROCESS CONNECTION', 'F48': 'INSERTION LEN. \\n \"U\" dim.', 'I48': 'HEAD LENGTH', 'K48': 'STEM LENGTH', 'M48': 'OPER. PRESS.\\n(kPag)', 'O48': 'OPER. VELOCITY\\n(m/s)', 'R48': 'SPECIFIC GRAVITY', 'S48': 'RTD/THERMOWELL MODEL NO.', 'X48': 'NOTES', 'AB41': 'WATER'}",
-    "tags_per_sheet": "6",
+    "file_path": "C:/Users/dcaoili/E-IC-102 Instrument Index Rev E_WORKING.xlsm",
+    "init_tag_coord": "G3",
+    "init_coords_to_fields": "{'C3': 'SYSTEM', 'D3': 'TAG PFX', 'E3': 'LOOP', 'F3': 'TAG SFX', 'G3': 'TAG NUMBER', 'H3': 'P&ID', 'I3': 'LINE NUMBER', 'J3': 'INSTRUMENT DESCRIPTION-1', 'K3': 'INSTRUMENT DESCRIPTION-2', 'L3': 'SERVICE2', 'M3': 'SIZE', 'N3': 'COMMENTS', 'O3': 'ASSOCIATED \\nDEVICES', 'P3': 'INST. RANGE, LOW', 'Q3': 'INST. RANGE, HIGH', 'R3': 'ENG. UNITS', 'S3': 'SETPOINT', 'T3': 'FAIL POSITION', 'U3': 'DATA SHEET', 'V3': 'SPECIFICATION NUMBER', 'W3': 'PACKAGE\\nNUMBER', 'X3': 'MANUFACTURER', 'Y3': 'MODEL\\n(Primary Device)', 'Z3': 'PURCHASE ORDER\\nNUMBER', 'AA3': 'SPECIFIED BY', 'AB3': 'SUPPLIED BY', 'AC3': 'INSTALLATION DETAIL NO.', 'AD3': 'INSTALLED BY', 'AE3': 'ADD DATE', 'AF3': 'DEL DATE', 'AG3': 'DOC\\nREV'}",
+    "tags_per_sheet": "1400",
     "selected_sheets": [
-        "DS-IC-TT-01",
-        "DS-IC-TT-02",
-        "DS-IC-TT-03",
-        "DS-IC-TT-04",
-        "DS-IC-TT-05",
-        "DS-IC-TT-07",
-        "DS-IC-TT-06"
+        "INDEX"
     ]
 }
