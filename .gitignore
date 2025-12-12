@@ -29,6 +29,7 @@ chromadb/
 *.log
 *.pickle
 *.pkl
+*.pdf
 
 # Specific directories to ignore
 misc files/

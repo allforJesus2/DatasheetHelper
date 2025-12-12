@@ -1202,22 +1202,31 @@ class DatasheetGeneratorApp:
             field = match.get('field', '-')
             value = match.get('match_value', '-')
             
+            # Get file path from data_sources
+            file_path = ''
+            if data_source in self.data_sources:
+                file_path = self.data_sources[data_source].get('path', '')
+            
             # Truncate long values
             if len(value) > 100:
                 value = value[:97] + "..."
             
-            self.search_tree.insert("", "end", values=(data_source, key, match_type, field, value))
+            # Truncate long file paths
+            if len(file_path) > 100:
+                file_path = "..." + file_path[-97:]
+            
+            self.search_tree.insert("", "end", values=(data_source, key, match_type, field, value, file_path))
         
         # If no matches, show a message in the treeview
         if not matches:
-            self.search_tree.insert("", "end", values=("No matches found", "", "", "", ""))
+            self.search_tree.insert("", "end", values=("No matches found", "", "", "", "", ""))
     
     def create_search_results_window(self):
         """Create the search results window (called once)"""
         # Create results window
         self.search_results_window = tk.Toplevel(self.root)
         self.search_results_window.title("Search Results")
-        self.search_results_window.geometry("800x500")
+        self.search_results_window.geometry("1100x500")
         
         # Make window stay on top initially, but allow user to move it
         self.search_results_window.transient(self.root)
@@ -1242,7 +1251,7 @@ class DatasheetGeneratorApp:
         
         # Treeview (store as instance variable)
         self.search_tree = ttk.Treeview(tree_frame, 
-                                       columns=("Data Source", "Key", "Match Type", "Field", "Value"),
+                                       columns=("Data Source", "Key", "Match Type", "Field", "Value", "File Path"),
                                        show="headings",
                                        yscrollcommand=vsb.set,
                                        xscrollcommand=hsb.set)
@@ -1256,12 +1265,14 @@ class DatasheetGeneratorApp:
         self.search_tree.heading("Match Type", text="Match Type")
         self.search_tree.heading("Field", text="Field")
         self.search_tree.heading("Value", text="Value")
+        self.search_tree.heading("File Path", text="File Path")
         
         self.search_tree.column("Data Source", width=120)
         self.search_tree.column("Key", width=150)
         self.search_tree.column("Match Type", width=100)
         self.search_tree.column("Field", width=120)
         self.search_tree.column("Value", width=280)
+        self.search_tree.column("File Path", width=300)
         
         # Pack treeview and scrollbars
         self.search_tree.grid(row=0, column=0, sticky="nsew")
@@ -1273,6 +1284,9 @@ class DatasheetGeneratorApp:
         
         # Bind double-click to open data viewer
         self.search_tree.bind("<Double-Button-1>", self.on_search_result_double_click)
+        
+        # Bind right-click to show context menu
+        self.search_tree.bind("<Button-3>", self.on_search_result_right_click)
         
         # Add close button
         close_btn = ttk.Button(main_frame, text="Close", command=self.search_results_window.destroy)
@@ -1302,6 +1316,63 @@ class DatasheetGeneratorApp:
                 
                 # Open the data viewer for this data source with the search term
                 self.view_data(data_source=data_source, initial_search=search_text)
+    
+    def on_search_result_right_click(self, event):
+        """Handle right-click on search result to show context menu"""
+        # Get the item at the click position
+        item = self.search_tree.identify_row(event.y)
+        if not item:
+            return
+        
+        # Select the item
+        self.search_tree.selection_set(item)
+        
+        # Get the item's values
+        values = self.search_tree.item(item, 'values')
+        
+        # Extract the data source and file path
+        if not values or len(values) < 6:
+            return
+        
+        data_source = values[0]
+        file_path = values[5]  # File Path is the 6th column (index 5)
+        
+        # Check if it's a valid data source (not the "No matches found" row)
+        if not data_source or data_source == "No matches found" or data_source not in self.data_sources:
+            return
+        
+        # Get the actual file path from data_sources (in case it was truncated)
+        actual_file_path = self.data_sources[data_source].get('path', '')
+        
+        # Create context menu
+        context_menu = tk.Menu(self.search_results_window, tearoff=0)
+        context_menu.add_command(label="Select data source", 
+                               command=lambda ds=data_source: self.select_data_source_from_search(ds))
+        context_menu.add_command(label="Open file path", 
+                               command=lambda fp=actual_file_path: self.open_file_path_from_search(fp))
+        
+        # Show the context menu
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+    
+    def select_data_source_from_search(self, data_source):
+        """Select the data source tab from search results"""
+        if data_source in self.data_sources:
+            self.select_data_source_tab(data_source)
+    
+    def open_file_path_from_search(self, file_path):
+        """Open the file path from search results"""
+        if not file_path or not os.path.exists(file_path):
+            messagebox.showerror("Error", f"File path does not exist:\n{file_path}")
+            return
+        
+        try:
+            # Open file with default application (Windows)
+            os.startfile(file_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open file:\n{str(e)}")
     
     def clear_data_source_search(self):
         """Clear the search entry and close any open search results"""
@@ -1460,13 +1531,14 @@ class DatasheetGeneratorApp:
                 destination_coords = coord_vals[current_destination]
                 has_coordinate_map = bool(destination_coords and len(destination_coords) > 0)
         
-        # Build text with indicators (order: map indicator first, then data indicator)
+        # Build text with indicators on the left (order: map indicator first, then data indicator)
+        indicators = ""
         if has_coordinate_map:
-            base_text += "🗺️"
+            indicators += "🗺️"
         if has_data:
-            base_text += "✓"
+            indicators += "✓"
         
-        return base_text
+        return indicators + base_text
     
     def strip_tab_indicators(self, tab_text):
         """Centralized function to remove indicators from tab text.
@@ -2056,6 +2128,7 @@ class DatasheetGeneratorApp:
             
             if choice == "datasheet":
                 # Process as datasheet
+                print(f"DEBUG: Processing {name} as datasheet from {file_path}")
                 self.load_data_source_from_datasheet(data_source, file_path)
             elif choice == "index":
                 # Process as index (generate dictionary)
@@ -2208,7 +2281,7 @@ class DatasheetGeneratorApp:
             ("Release Excel", self.release_excel_connection),
             ("Release All Excel", self.release_all_excel_connections),
             ("Stop Datasheet Generation", self.set_halt_flag),
-            ("refresh tab content", self.refresh_tab_content(force_rebuild=True)),
+            ("refresh tab content", lambda: self.refresh_tab_content(force_rebuild=True)),
             ('update combo box', self.update_combo_boxes),
             ('update coordinates combo', self.update_all_coordinates_combo_boxes),
             ("Migrate to Multi-Destination Format", self.migrate_to_multi_destination),
@@ -3030,7 +3103,8 @@ class DatasheetGeneratorApp:
             data_source: The data source name to configure filters for
             show_info_label: Whether to show the info label at the top
         """
-        filters_entries = []
+        filters_entries = []  # Stores tuples of (name_entry, filter_entry)
+        filter_rows = []  # Stores tuples of (name_label, name_entry, filter_label, filter_entry) for cleanup
         combo_values = []
         
         def refresh_combo_values():
@@ -3072,6 +3146,39 @@ class DatasheetGeneratorApp:
                         unique_values.add(str(entry_data[header]))
             return sorted(list(unique_values))
 
+        def remove_filter_row(row_index):
+            """Remove a specific filter row by index"""
+            if row_index < 0 or row_index >= len(filter_rows):
+                return
+            
+            # Get the widgets for this row
+            name_label, name_entry, filter_label, filter_entry, remove_button = filter_rows[row_index]
+            
+            # Destroy all widgets
+            name_label.destroy()
+            name_entry.destroy()
+            filter_label.destroy()
+            filter_entry.destroy()
+            remove_button.destroy()
+            
+            # Remove from lists
+            filter_rows.pop(row_index)
+            filters_entries.pop(row_index)
+            
+            # Re-grid all remaining rows to update row numbers
+            for idx, (nl, ne, fl, fe, rb) in enumerate(filter_rows):
+                new_row = idx + 1
+                nl.grid(row=new_row, column=0)
+                ne.grid(row=new_row, column=1)
+                fl.grid(row=new_row, column=2)
+                fe.grid(row=new_row, column=3)
+                rb.grid(row=new_row, column=4)
+                # Update label text
+                nl.config(text=f"Index Key {new_row}:")
+                fl.config(text=f"Filter {new_row}:")
+            
+            print(f"Removed filter row {row_index + 1}")
+
         def add_filter_row(name='', filter_value=''):
             new_row = len(filters_entries) + 1
             name_label = tk.Label(content_frame, text=f"Index Key {new_row}:")
@@ -3089,6 +3196,11 @@ class DatasheetGeneratorApp:
             filter_entry.grid(row=new_row, column=3)
             filter_entry.set(filter_value)
 
+            # Add remove button for this row
+            remove_button = ttk.Button(content_frame, text="Remove", 
+                                       command=lambda idx=len(filter_rows): remove_filter_row(idx))
+            remove_button.grid(row=new_row, column=4, padx=5)
+
             # Update filter values when header changes
             def on_header_change(event=None):
                 selected_header = name_entry.get()
@@ -3102,6 +3214,7 @@ class DatasheetGeneratorApp:
             name_entry.bind('<KeyRelease>', on_header_change)
 
             filters_entries.append((name_entry, filter_entry))
+            filter_rows.append((name_label, name_entry, filter_label, filter_entry, remove_button))
 
         def save_filters():
             self.data_sources[data_source]['tag_filters'].clear()
@@ -3111,6 +3224,28 @@ class DatasheetGeneratorApp:
                 if name:  # Allow blank filter_value for filtering empty fields
                     self.data_sources[data_source]['tag_filters'].append([name, filter_value])
             print(f"Saved Tag Filters for {data_source}: {self.data_sources[data_source]['tag_filters']}")
+        
+        def clear_filters():
+            """Remove all filter rows from UI and clear saved filters"""
+            # Destroy all widgets in all filter rows
+            for name_label, name_entry, filter_label, filter_entry, remove_button in filter_rows:
+                name_label.destroy()
+                name_entry.destroy()
+                filter_label.destroy()
+                filter_entry.destroy()
+                remove_button.destroy()
+            
+            # Clear the entries lists
+            filters_entries.clear()
+            filter_rows.clear()
+            
+            # Clear saved filters
+            self.data_sources[data_source]['tag_filters'].clear()
+            
+            # Add back one empty row
+            add_filter_row()
+            
+            print(f"Cleared all filters for {data_source}")
 
         # Add explanatory label if requested
         if show_info_label:
@@ -3128,6 +3263,9 @@ class DatasheetGeneratorApp:
 
         refresh_button = ttk.Button(button_frame, text="Refresh", command=refresh_combo_values)
         refresh_button.pack(side="left", padx=5)
+
+        clear_button = ttk.Button(button_frame, text="Clear Filters", command=clear_filters)
+        clear_button.pack(side="left", padx=5)
 
         save_button = ttk.Button(button_frame, text="Save", command=save_filters)
         save_button.pack(side="right", padx=5)
@@ -3630,9 +3768,17 @@ class DatasheetGeneratorApp:
                     print('header', header)
                     # Split the filter key on commas to get multiple acceptable values
                     acceptable_values = [value.strip() for value in filter_key.split(',')]
-
+                    
+                    # Get the tag's value for this header, handling missing headers
+                    tag_value = primary_data[tag].get(header, None)
+                    
+                    # Normalize None to empty string for comparison when filter is blank
+                    # This allows blank filters to match both None and empty string values
+                    if tag_value is None:
+                        tag_value = ''
+                    
                     # If the tag's value for this header isn't in our acceptable values, filter it out
-                    if primary_data[tag][header] not in acceptable_values:
+                    if tag_value not in acceptable_values:
                         continue_flag = True
                         break
 
@@ -3955,6 +4101,13 @@ class DatasheetGeneratorApp:
                                             append_suffix_to_green=self.append_suffix_to_green_var.get(), # Pass append suffix option
                                             clear_highlighting_on_match=self.clear_highlighting_on_match_var.get()) # Pass clear highlighting option
             self.excel_mgr.mark_as_modified()
+            
+            # Invalidate sheet names cache if new sheets were created
+            # This ensures refresh_tab_content will get updated sheet names when needed
+            if self.new_sheets:
+                print(f"DEBUG: New sheets created: {self.new_sheets}, invalidating sheet names cache")
+                if hasattr(self, '_cached_sheet_names'):
+                    delattr(self, '_cached_sheet_names')
             
             if self.halt_flag:
                 print("Process was halted by user")
@@ -5500,7 +5653,7 @@ class DatasheetGeneratorApp:
                 dialog.geometry("400x150")
                 dialog.transient(self.root)
                 dialog.grab_set()
-                self.center_over_parent(dialog)
+                center_window_over_parent(dialog)
                 Label(dialog, text="Which header column should be used as the key?", 
                       wraplength=350).pack(pady=10)
                 
@@ -5898,7 +6051,7 @@ class DatasheetGeneratorApp:
                 layer_dialog.title("Add Sort Layer")
                 layer_dialog.transient(layered_sort_dialog)
                 layer_dialog.grab_set()
-                layer_dialog.geometry("400x400")
+                layer_dialog.geometry("400x500")
                 center_window_over_parent(layer_dialog)
                 
                 # Sort type selection
@@ -6804,8 +6957,27 @@ The datasheets have been generated and are ready for use."""
             print("DEBUG: Using cached sheet names")
             return self._cached_sheet_names
         
+        # Try to use xlwings workbook if available (more efficient, no file reload needed)
         try:
-            print(f"DEBUG: Loading workbook: {self.destination_datasheet}")
+            if self.excel_mgr.wb and self.excel_mgr.original_path:
+                # Check if the xlwings workbook matches our destination file
+                normalized_xlwings_path = self.excel_mgr._normalize_path(self.excel_mgr.original_path)
+                normalized_dest_path = self.excel_mgr._normalize_path(self.destination_datasheet)
+                if normalized_xlwings_path == normalized_dest_path:
+                    print("DEBUG: Using xlwings workbook to get sheet names (no file reload needed)")
+                    sheet_names = [sheet.name for sheet in self.excel_mgr.wb.sheets]
+                    print(f"DEBUG: Found {len(sheet_names)} sheets via xlwings: {sheet_names}")
+                    # Cache the sheet names
+                    self._cached_sheet_names = sheet_names
+                    self._cached_sheet_file = self.destination_datasheet
+                    print("DEBUG: Sheet names cached")
+                    return sheet_names
+        except Exception as e:
+            print(f"DEBUG: Could not use xlwings workbook for sheet names: {e}, falling back to openpyxl")
+        
+        # Fallback to openpyxl if xlwings workbook not available
+        try:
+            print(f"DEBUG: Loading workbook with openpyxl: {self.destination_datasheet}")
             # Use read_only=True and data_only=True for faster loading
             wb = openpyxl.load_workbook(self.destination_datasheet, read_only=True, data_only=True)
             print("DEBUG: Workbook loaded successfully")

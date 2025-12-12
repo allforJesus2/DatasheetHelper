@@ -1,5 +1,6 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, scrolledtext
+from tkinter import Toplevel
 import re
 import openpyxl
 import ast
@@ -233,10 +234,11 @@ def split_text_on_first_number(text):
 
 def coord_to_row_col(coord):
     """
-    Convert Excel coordinate string (e.g., 'A1', 'B104') to (row, column) tuple.
+    Convert Excel coordinate string (e.g., 'A1', 'b104') to (row, column) tuple.
+    Accepts both uppercase and lowercase column letters.
     Returns (row, col) where row is 1-indexed and col is 1-indexed.
     """
-    match = re.match(r'([A-Z]+)(\d+)', coord)
+    match = re.match(r'([A-Za-z]+)(\d+)', coord)
     if not match:
         raise ValueError(f"Invalid coordinate format: {coord}")
     
@@ -245,7 +247,7 @@ def coord_to_row_col(coord):
     
     # Convert column letters to number (A=1, B=2, ..., Z=26, AA=27, etc.)
     col = 0
-    for char in col_str:
+    for char in col_str.upper():
         col = col * 26 + (ord(char) - ord('A') + 1)
     
     return row, col
@@ -441,26 +443,9 @@ class DatasheetExtractor:
             
             # Show message about duplicates if any were found
             if duplicate_tags_info:
-                unique_duplicate_tags = set(info['tag'] for info in duplicate_tags_info)
-                duplicate_count = len(unique_duplicate_tags)
-                
-                # Create detailed message
-                message = f"Data extraction completed successfully.\n\n"
-                message += f"Found {duplicate_count} unique tag(s) with duplicates:\n\n"
-                
-                # Limit to first 5 tags in the message to avoid overwhelming the user
-                shown_tags = list(unique_duplicate_tags)[:5]
-                for tag in shown_tags:
-                    occurrences = [info for info in duplicate_tags_info if info['tag'] == tag]
-                    message += f"• '{tag}': {len(occurrences) + 1} total occurrences\n"
-                
-                if duplicate_count > 5:
-                    message += f"\n... and {duplicate_count - 5} more duplicate tag(s)."
-                
-                message += "\n\nDuplicate tags were automatically renamed with suffixes (e.g., tag_2, tag_3).\n"
-                message += "Check the console/log for detailed information."
-                
-                messagebox.showwarning("Extraction Complete - Duplicates Found", message)
+                # Show duplicates in scrollable window
+                self.show_duplicates_window(duplicate_tags_info)
+                messagebox.showinfo("Extraction Complete", "Data extraction completed successfully.\n\nDuplicate tags were found and automatically renamed with suffixes (e.g., tag_2, tag_3).\n\nSee the duplicate summary window for details.")
             else:
                 messagebox.showinfo("Result", "Data extraction completed successfully.")
             
@@ -681,6 +666,77 @@ class DatasheetExtractor:
                     self.sheet_listbox.selection_set(i)
         except Exception as e:
             print(f"Error restoring selected sheets: {e}")
+
+    def show_duplicates_window(self, duplicate_tags_info):
+        """Display duplicate tags information in a scrollable, copyable window"""
+        if not duplicate_tags_info:
+            return
+        
+        # Create new window
+        dialog = Toplevel(self.root)
+        dialog.title("Duplicate Tags Summary")
+        dialog.geometry("700x600")
+        dialog.transient(self.root)
+        
+        # Header label
+        unique_duplicate_tags = set(info['tag'] for info in duplicate_tags_info)
+        header_text = f"Found {len(unique_duplicate_tags)} unique tag(s) with duplicates"
+        header_label = tk.Label(dialog, text=header_text, font=("Arial", 10, "bold"))
+        header_label.pack(padx=10, pady=(10, 5))
+        
+        # Create scrollable text area
+        text_frame = tk.Frame(dialog)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        log_text = scrolledtext.ScrolledText(text_frame, wrap=tk.WORD, width=80, height=25, font=("Courier", 9))
+        log_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Populate text with duplicate information
+        log_text.insert(tk.END, "DUPLICATE TAG SUMMARY\n")
+        log_text.insert(tk.END, "=" * 80 + "\n\n")
+        
+        # Group duplicates by tag
+        for tag in sorted(unique_duplicate_tags):
+            occurrences = [info for info in duplicate_tags_info if info['tag'] == tag]
+            total_occurrences = len(occurrences) + 1  # +1 for the original
+            
+            log_text.insert(tk.END, f"Tag: '{tag}'\n")
+            log_text.insert(tk.END, f"  Total occurrences: {total_occurrences} (1 original + {len(occurrences)} duplicate(s))\n")
+            log_text.insert(tk.END, f"  Duplicate details:\n")
+            
+            for occ in occurrences:
+                log_text.insert(tk.END, f"    - Sheet: '{occ['sheet']}', Coordinate: {occ['coordinate']}, Renamed to: '{tag}_{occ['occurrence']}'\n")
+            
+            log_text.insert(tk.END, "\n")
+        
+        log_text.insert(tk.END, "\n" + "=" * 80 + "\n")
+        log_text.insert(tk.END, "Note: Duplicate tags were automatically renamed with suffixes (e.g., tag_2, tag_3).\n")
+        log_text.insert(tk.END, "You can select and copy this text using Ctrl+C or right-click.\n")
+        
+        # Make text selectable and copyable (keep enabled for copying)
+        log_text.config(state=tk.NORMAL)
+        
+        # Buttons frame
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
+        
+        # Copy button
+        def copy_all_text():
+            dialog.clipboard_clear()
+            dialog.clipboard_append(log_text.get("1.0", tk.END))
+            messagebox.showinfo("Copied", "All text copied to clipboard!")
+        
+        copy_button = tk.Button(button_frame, text="Copy All", command=copy_all_text, width=15)
+        copy_button.pack(side=tk.LEFT, padx=5)
+        
+        close_button = tk.Button(button_frame, text="Close", command=dialog.destroy, width=15)
+        close_button.pack(side=tk.RIGHT, padx=5)
+        
+        # Center over parent
+        center_window_over_parent(dialog)
+        
+        # Focus on the text widget
+        log_text.focus_set()
 
 
 

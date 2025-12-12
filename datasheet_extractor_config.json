@@ -1,9 +1,7 @@
 {
-    "file_path": "C:/Users/dcaoili/E-IC-102 Instrument Index Rev E_WORKING.xlsm",
-    "init_tag_coord": "G3",
-    "init_coords_to_fields": "{'C3': 'SYSTEM', 'D3': 'TAG PFX', 'E3': 'LOOP', 'F3': 'TAG SFX', 'G3': 'TAG NUMBER', 'H3': 'P&ID', 'I3': 'LINE NUMBER', 'J3': 'INSTRUMENT DESCRIPTION-1', 'K3': 'INSTRUMENT DESCRIPTION-2', 'L3': 'SERVICE2', 'M3': 'SIZE', 'N3': 'COMMENTS', 'O3': 'ASSOCIATED \\nDEVICES', 'P3': 'INST. RANGE, LOW', 'Q3': 'INST. RANGE, HIGH', 'R3': 'ENG. UNITS', 'S3': 'SETPOINT', 'T3': 'FAIL POSITION', 'U3': 'DATA SHEET', 'V3': 'SPECIFICATION NUMBER', 'W3': 'PACKAGE\\nNUMBER', 'X3': 'MANUFACTURER', 'Y3': 'MODEL\\n(Primary Device)', 'Z3': 'PURCHASE ORDER\\nNUMBER', 'AA3': 'SPECIFIED BY', 'AB3': 'SUPPLIED BY', 'AC3': 'INSTALLATION DETAIL NO.', 'AD3': 'INSTALLED BY', 'AE3': 'ADD DATE', 'AF3': 'DEL DATE', 'AG3': 'DOC\\nREV'}",
-    "tags_per_sheet": "1400",
-    "selected_sheets": [
-        "INDEX"
-    ]
+    "file_path": "//stor-dn-01.se.local/projects/Projects/24317_Electra_CO_EPCM/Engineering/Instrumentation/DataSheets/SPEC-IC-FMU-02 Flowmeter (Ultrasonic) Rev 0.xlsx",
+    "init_tag_coord": "G12",
+    "init_coords_to_fields": "{'G12': 'TAG NUMBER', 'G13': 'SERVICE', 'G14': 'P&ID', 'G15': 'MANUFACTURER', 'G16': 'MODEL NUMBER', 'G53': 'FLOW[LIQUID] (L/min)_MIN.', 'H53': 'FLOW[LIQUID] (L/min)_OPER', 'K53': 'FLOW[LIQUID] (L/min)_MAX', 'G54': 'Q = FLOW[VAPOR] (scfm)_MIN.', 'H54': 'Q = FLOW[VAPOR] (scfm)_OPER', 'K54': 'Q = FLOW[VAPOR] (scfm)_MAX', 'G55': 'VELOCITY (m/sec)_MIN.', 'H55': 'VELOCITY (m/sec)_OPER', 'K55': 'VELOCITY (m/sec)_MAX', 'G56': 'PRESSURE (kPag)_MIN.', 'H56': 'PRESSURE (kPag)_OPER', 'K56': 'PRESSURE (kPag)_MAX', 'G57': 'TEMPERATURE (\u00b0C)_MIN.', 'H57': 'TEMPERATURE (\u00b0C)_OPER', 'K57': 'TEMPERATURE (\u00b0C)_MAX', 'G59': 'FULL SCALE FLOW (L/min)', 'G60': 'FULL SCALE FLOW (scfm)', 'G61': 'VELOCITY (m/s) @ FULL SCALE', 'G62': 'DESIGN PRESSURE (kPag)', 'G63': 'DESIGN TEMPERATURE (\u00b0C)', 'G18': 'LINE NUMBER', 'G19': 'LINE SIZE / MATERIAL'}",
+    "tags_per_sheet": "1",
+    "selected_sheets": []
 }
